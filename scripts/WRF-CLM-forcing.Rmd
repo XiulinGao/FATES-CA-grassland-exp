@@ -1,0 +1,504 @@
+---
+title: "WRF-CLM-forcing"
+author: "Xiulin Gao"
+Date: "July-2022"
+---
+
+#Introduction
+
+This scripts reformat WRF down-scaled 9km climate driver for western US to 
+CLM readable forcing files. Data is subset to only cover CA region for year 1981-2020. 
+
+
+
+```{r}
+library(ncdf4)
+library(lubridate)
+library(tidyverse)
+library(stars)
+library(foreach)
+library(parallel)
+library(iterators)
+library(doParallel)
+library(data.table)
+```
+
+
+
+
+```{r,label="intial-settings"}
+
+main_path <- file.path('/global/cfs/cdirs/m3298/CA_grass/9km-WRF_1980-2021')
+out_path <- file.path(main_path,"WRF-out")
+dirs <- list.dirs(main_path)
+dirs <- dirs[grepl("d02", dirs)]
+#print(dirs)
+
+
+wrf_met <- c("PSFC","T2","Q2","SWDNB","LWDNB","RAINC","RAINNC","U10","V10")
+
+```
+
+
+
+
+```{r,label="data-info"}
+
+author_name   <- "Xiulin Gao"
+author_email  <- "xiulingao@lbl.gov"
+datprov_name  <- "Stefan Rahimi"
+datprov_email <- "s.rahimi@ucla.edu"
+data_usage_notes = paste0( " If you plan to use these data for any scientific analysis,"
+                           , " you should contact the data provider first and ask for permission"
+                           , " to use the data and check with them how to acknowledge their"
+                           , " contribution (including, but not limited to offer co-authorship)."
+)
+
+xid         <- "California"
+reg_desc    <- "California state, U.S."
+dat_version <- "v1-1"
+site_refhgt <-   30
+dxy         <-   9000
+undef       <- -9999.0000
+
+```
+
+
+
+
+
+```{r,label="region-mask"}
+
+lon_bnds <- c(-124.5, -114) # bounds for California, used for data subset
+lat_bnds <- c(32.5, 42)
+
+dim_path <- file.path(main_path, "wrfinput_d02")
+dim_nc <- nc_open(dim_path)
+lons <- ncvar_get(dim_nc, "XLONG") #centers of curvilinear grids are unique (no shared long or lat) 
+lats <- ncvar_get(dim_nc,"XLAT")   #so the long and lat are 2D matrix
+nc_close(dim_nc)
+## use the longitude and latitude bounds to create a mask for data subset
+mask <-   lons>=lon_bnds[1] & lons<=lon_bnds[2] & lats>=lat_bnds[1] & lats<=lat_bnds[2]
+
+
+colindx <- apply(mask,1,which) 
+colid_min <- min(unlist(colindx)) # min col index for data subset
+colid_max <- max(unlist(colindx)) # max col index for data subset
+
+rowindx <- unlist(lapply(colindx, length))
+rowid_min <- min(which(rowindx!=0)) # min row index 
+rowid_max <- max(which(rowindx!=0)) # max row index
+
+## dimension information for output forcing data 
+dim <- read_ncdf(dim_path,var=c("XLONG","XLAT"),ncsub= cbind(start=c(1,1,1),
+                                                             count=c(rowid_max,colid_max,1)))
+x <- matrix(dim[[1]], rowid_max, colid_max)
+y <- matrix(dim[[2]], rowid_max, colid_max)
+
+x_sub <- dim[[1]][rowid_min:rowid_max,colid_min:colid_max,1]
+y_sub <- dim[[2]][rowid_min:rowid_max,colid_min:colid_max,1]
+xdim <- dim(x_sub)[1]
+ydim <- dim(x_sub)[2]
+XLONG <- as.vector(x_sub)
+XLAT <- as.vector(y_sub)
+
+##### set dir to read
+#### currently, this is done by manually looping through each folder to avoid kernel crash due to memory issue
+dir_now <- dirs[42]
+files_now <- list.files(dir_now, pattern="auxhist_")
+XLONG_co <- rep(XLONG,times=length(files_now))
+XLAT_co <- rep(XLAT,times=length(files_now))
+
+```
+
+
+
+
+
+```{r,label="concatenate-file-fun"}
+
+read_met <-function(filename) {
+  time_now <- substr(filename,73,94)
+  time_now <- ymd_hms(time_now)
+
+  met_now <- read_ncdf(filename,var=wrf_met,
+                        ncsub= cbind(start=c(1,1,1),
+                                     count=c(rowid_max,colid_max,1)))
+  met_now <- sapply(met_now,"[",rowid_min:rowid_max,colid_min:colid_max,1, simplify = TRUE)
+  met_dat <- as.data.frame(met_now)
+  met_dat <- met_dat %>%  mutate(time = time_now)
+  
+  return(met_dat)
+}
+```
+
+
+
+
+
+
+```{r,label="parallel-processing"}
+## parallel using foreach and doParallel packages
+## reference: https://stackoverflow.com/questions/38318139/run-a-for-loop-in-parallel-in-r
+## !!!! only run this till all the data combined into one big annual file!!!!!!
+
+# list all files, we do this one folder at each time
+# need to figure out how to loop through folders. ## TO DO
+
+#head(files_now,10)
+#tail(files_now,10)
+## set up parallel backend to use more than 1 processor
+cores = detectCores()
+cl <- makeCluster(50)
+registerDoParallel(cl)
+
+## concatenate files 
+final_met <- foreach(i=seq(length(files_now)),.combine=rbind,
+                     .packages = c("tidyverse","lubridate","stars")) %dopar% {
+  file_now <- files_now[i]
+  file_path <- file.path(dir_now, file_now)
+  temp_met <- read_met(file_path)
+                     }
+final_met$XLONG <- XLONG_co
+final_met$XLAT <- XLAT_co
+t <- substr(final_met$time[1], 1, 4)
+file_name <- paste0(t, "_all.csv")
+fwrite(final_met,file.path(out_path,file_name),row.names=FALSE)
+rm(final_met)
+
+## stop cluster once done
+stopCluster(cl)
+```
+
+
+
+
+
+
+```{r,label="output-setting"}
+# Labels for describing the data set.
+ymd_now = today(tzone = "UTC")
+ymd_lab = sprintf("%4.4i%2.2i%2.2i",year(ymd_now),month(ymd_now),day(ymd_now))
+
+# Tag specific for this region and version (used for file and path names).
+reg_tag  = paste0("9km_",xid,"_", dat_version,"_c",ymd_lab)
+
+# output path
+metd_path = file.path(out_path,reg_tag)
+
+# create dir
+dummy = dir.create(path=metd_path  ,showWarnings=FALSE,recursive=TRUE) #only run once
+```
+
+
+
+
+
+
+```{r,label="standardize-unit-name"}
+
+hr_2_sec <- 3600
+#met_all <- final_met
+
+df_files <- list.files(out_path,pattern=".csv$")
+df_paths <- file.path(out_path,df_files)
+
+
+## write out monthly forcing file
+for(i in seq(length(df_paths))){
+    met_all <- fread(df_paths[i])
+
+met_all <- met_all %>% mutate(WIND = U10*U10 + V10*V10,
+                                PRECIP = RAINC+RAINNC) %>% 
+                         dplyr::select(-c("RAINC","RAINNC","U10","V10"))
+
+met_all <- met_all %>% mutate(WIND = sqrt(WIND))
+
+met_all <- met_all %>% group_by(XLONG,XLAT) %>% 
+  mutate(PPT = PRECIP - lag(PRECIP,default=NA)) %>% ungroup()
+
+met_all <- met_all %>% mutate(PPT = PPT/hr_2_sec) %>% select(c("XLONG","XLAT","time",
+                                                         "PSFC","T2","Q2","PPT",
+                                                         "WIND","SWDNB","LWDNB")) %>% 
+  rename(PSRF=PSFC,
+         TBOT=T2,
+         QBOT=Q2,
+         PRECTmms=PPT,
+         FSDS=SWDNB,
+         FLDS=LWDNB)
+
+dt <- mean(diff(unique(met_all$time))) 
+dt.utc <- make_difftime(hour=0) - 0.5*dt
+met_all <- met_all %>% mutate(time = time + dt.utc) 
+met_all <- met_all %>% filter(!is.na(PRECTmms))
+
+ 
+}
+
+
+
+```
+
+
+
+
+```{r,label="split-file"}
+# split data by year and month
+met_out <- met_all                                        %>% 
+           mutate( year = year(time), month=month(time))  %>%
+           group_split(year, month, .keep=FALSE)
+
+nmet = length(met_out)
+
+```
+
+
+
+
+```{r, label="global-attributes"}
+## global attributes
+
+# Define the template.  We will update the title in each time step.
+att_template = list( title          = "To be replaced when looping through months"
+                     , version        = dat_version
+                     , date_created   = paste0(as.character(now(tzone="UTC")), "UTC")
+                     , source_code    = "WRF-CLM-forcing.R"
+                     , code_notes     = "Meteorological drivers compatible with ELM-FATES and CLM-FATES"
+                     , code_developer = paste0( intToUtf8(rev(developer_name))
+                                                ," <"
+                                                , intToUtf8(rev(developer_email))
+                                                ,">"
+                     )#end paste0
+                     , file_author    = paste0(author_name," <",author_email,">")
+                     , data_provider  = paste0(datprov_name," <",datprov_email,">")
+                     , usage_notes    = data_usage_notes
+)#end list
+```
+
+
+
+
+
+
+
+```{r,label="FATES-forcing-info"}
+######### FATES forcing variables ########
+
+n       = 0
+varinfo = list()
+n       = n + 1
+varinfo[[n]] = list( vfates = "PSRF"
+                     , vlname = "surface pressure"
+                     , vunits = "Pa"
+                     , vinput = "PSRF"
+                     , add0   = 0.
+                     , mult   = 1.
+)#end list
+n       = n + 1
+varinfo[[n]] = list( vfates = "TBOT"
+                     , vlname = "air temperature at 2m"
+                     , vunits = "K"
+                     , vinput = "TBOT"
+                     , add0   = 0.
+                     , mult   = 1.
+)#end list
+n       = n + 1
+varinfo[[n]] = list( vfates = "QBOT"
+                     , vlname = "specific humidity"
+                     , vunits = "kg/kg"
+                     , vinput = "QBOT"
+                     , add0   = 0.
+                     , mult   = 1.
+)#end list
+
+n       = n + 1
+varinfo[[n]] = list( vfates = "WIND"
+                     , vlname = "wind speed"
+                     , vunits = "m/s"
+                     , vinput = "WIND"
+                     , add0   = 0.
+                     , mult   = 1.
+)#end list
+n       = n + 1
+varinfo[[n]] = list( vfates = "FSDS"
+                     , vlname = "incident solar radiation"
+                     , vunits = "W/m2"
+                     , vinput = "FSDS"
+                     , add0   = 0.
+                     , mult   = 1.
+)#end list
+n       = n + 1
+varinfo[[n]] = list( vfates = "PRECTmms"
+                     , vlname = "precipitation rate"
+                     , vunits = "mm/s"
+                     , vinput = "PRECTmms"
+                     , add0   = 0.
+                     , mult   = 1.
+)#end list
+
+n       = n + 1
+varinfo[[n]] = list( vfates = "FLDS"
+, vlname = "incident long wave radiation"
+, vunits = "W/m2"
+, vinput = "FLDS"
+, add0   = 0.
+, mult   = 1.
+)#end list
+
+# Convert varinfo to a "tibble" object
+varinfo  = do.call(what=rbind,args=lapply(X=varinfo,FUN=as_tibble,stringsAsFactors=FALSE))
+
+```
+
+
+
+
+
+```{r,label="create-monthly-forcing"}
+###### loop through each month to create forcing output #######
+
+for (m in sequence(nmet)){
+  # Copy the subset to a local variable.
+  #met_this = met_output[[m]] # if with Gregorian calender then this is the subset for processing
+  met_this = met_out[[m]] %>% filter( ! ( (month(time) == 2) & (day(time) == 29))) # for no leap calender
+  nthis    = length(unique(met_this$time))
+  
+  # Find first time for this month
+  year_this   = unique(year (met_this$time))
+  month_this  = unique(month(met_this$time))
+  first_this  = make_date(year_this,month_this,1)
+  
+  
+  # Extract time, and turn it into a difference in days
+  tsince = as.numeric(difftime(unique(met_this$time),first_this,units="days"))
+  
+  
+  # Create label for this month
+  year_this  = unique(year (met_this$time))
+  month_this = unique(month(met_this$time))
+  when_lab   = sprintf("%4.4i-%2.2i",year_this,month_this)
+  
+  
+  # File name
+  nc_base = paste0(when_lab,".nc")
+  nc_file = file.path(metd_path,nc_base)
+  cat(" + Write output for ",when_lab," (",nc_base,").\n",sep="")
+  
+  # In case file exists, it will be re-created.
+  if (file.exists(nc_file)) file.remove(nc_file)
+  
+  # Add dimensions: longitude, latitude, and time. We do not automatically create the 
+  # dimension variable for time because R would create it in double precision.  Instead,
+  # we append variable time manually.
+  xx  <- ncdim_def( name="lon"   ,units="",vals= sequence(xdim)   ,create_dimvar=FALSE)
+  yy  <- ncdim_def( name="lat"   ,units="",vals= sequence(ydim)   ,create_dimvar=FALSE)
+  tt  <- ncdim_def( name="time"  ,units="",vals=seq_along(tsince),create_dimvar=FALSE)
+  ss  <- ncdim_def( name="scalar",units="",vals=1L               ,create_dimvar=FALSE)
+  
+  # List of dimensions, useful for setting variables.   
+  nc_xy  = list   (xx,yy)
+  nc_xyt = list(xx,yy,tt)
+  nc_t   = list      (tt)
+  nc_s   = list(ss)
+  xy     = c(xdim,ydim)
+  xyt    = c(xdim,ydim,nthis)
+  
+  # Start list with variables. First we put the coordinates
+  nc_vlist        = list()
+  nc_vlist$LONGXY = ncvar_def( name       = "LONGXY"
+                               , units    = "degrees_east"
+                               , dim      = nc_xy
+                               , missval  = undef
+                               , longname = "longitude"
+  )#end ncvar_def
+  nc_vlist$LATIXY = ncvar_def( name     = "LATIXY"
+                               , units    = "degrees_north"
+                               , dim      = nc_xy
+                               , missval  = undef
+                               , longname = "latitude"
+  )#end ncvar_def
+  nc_vlist$time   = ncvar_def( name     = "time"
+                               , units    = paste0( "days since ",as.character(first_this)
+                                                    , " 00:00:00 UTC"
+                               )#end paste0
+                               , dim      = nc_t
+                               , missval  = undef
+                               , longname = "WRF model time"
+  )#end ncvar_def
+  
+  # Loop through FATES met drivers, add them   
+  for (v in seq_along(varinfo[[1]])){
+    # Handy shorter names
+    v_vfates = varinfo$vfates[v]
+    v_vlname = varinfo$vlname[v]
+    v_vunits = varinfo$vunits[v]
+    
+    #Add variable information
+    nc_vlist[[v_vfates]] = ncvar_def( name     = v_vfates
+                                      , units    = v_vunits
+                                      , dim      = nc_xyt
+                                      , missval  = undef
+                                      , longname = v_vlname
+    )#end ncvar_def
+  }#end for (v in seq_along(varinfo[[1]]))
+  
+  # Create file
+  nc_conn = nc_create(filename=nc_file,vars=nc_vlist,verbose=FALSE)
+  
+  #---~---
+  # Put coordinates and attributes to the netcdf
+  #---~---
+  # Longitude, append time-invariant tag
+  dummy = ncvar_put(nc=nc_conn,varid="LONGXY",vals=array(data=XLONG    ,dim=xy))
+  dummy = ncatt_put(nc=nc_conn,varid="LONGXY",attname="mode"    ,attval="time-invariant")
+  # Latitude, append time-invariant tag
+  dummy = ncvar_put(nc=nc_conn,varid="LATIXY",vals=array(data=XLAT     ,dim=xy))
+  dummy = ncatt_put(nc=nc_conn,varid="LATIXY",attname="mode"    ,attval="time-invariant")
+  # Time, append calendar type.
+  dummy = ncvar_put(nc=nc_conn,varid="time"  ,vals=tsince)
+  dummy = ncatt_put(nc=nc_conn,varid="time"  ,attname="calendar",attval="noleap")
+  #---~---
+  
+  # Put variables to the netcdf
+  for (v in seq_along(varinfo[[1]])){
+    # Handy shorter names
+    v_vfates = varinfo$vfates[v]
+    v_vlname = varinfo$vlname[v]
+    v_vunits = varinfo$vunits[v]
+    
+    #Add variable information
+    dummy = ncvar_put( nc    = nc_conn
+                       , varid = v_vfates
+                       , vals  = array(data=met_this[[v_vfates]],dim=xyt)
+    )#end ncvar_put
+    
+    #Add attribute to highlight this is time-dependent
+    dummy = ncatt_put( nc      = nc_conn
+                       , varid   = v_vfates
+                       , attname = "mode"
+                       , attval  = "time-dependent")
+  }#end for (v in seq_along(varinfo[[1]]))
+  
+  # Add title specific for this month/year.
+  nc_title   = paste0( "Meteorological forcing for ",reg_desc
+                       , "(",month.abb[month_this]," ",year_this,")"
+  )#end paste0
+  att_global = modifyList( x = att_template, val = list( title = nc_title ))
+  
+  
+  # Loop through global attributes
+  for (l in seq_along(att_global)){
+    # Current attribute information
+    att_name  = names(att_global)[l]
+    att_value = att_global[[l]]
+    
+    # Add attribute 
+    dummy = ncatt_put(nc=nc_conn,varid=0,attname=att_name,attval=att_value)
+  }#end for (l in seq_along(att_global))
+  
+  
+  # Close the file
+  dummy = nc_close(nc_conn)
+}#end for (m in sequence(nmet))
+```
+
