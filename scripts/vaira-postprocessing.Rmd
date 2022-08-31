@@ -601,11 +601,11 @@ if ("nc_conn" %in% ls()){dummy = nc_close(nc_conn); rm(nc_conn)}
   # qintr,qover,qsoil,qvege,qvegt,rain,the goal is to convert those to mm/month
   # by multiplying seconds/month
   
-  # cmon.day = days_in_month(each_tstamp[w])
-  # cmon.hr  = day.hr  * cmon.day
-  # cmon.min = day.min * cmon.day
-  # cmon.sec = day.sec * cmon.day
- 
+   cmon.day = days_in_month(each_tstamp[w])
+   cmon.hr  = day.hr  * cmon.day
+   cmon.min = day.min * cmon.day
+   cmon.sec = day.sec * cmon.day
+last_hlm1d  = hlm1dvar$vnam[hlm1dvar$mult=="cmon.sec"] 
   
 # Open NetCDF connection and retrieve variable names
 nc_conn  = nc_open(case_file)
@@ -737,6 +737,8 @@ for (v in sequence(nhlm1d-etr_last-er_last)){
   nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
   nc_dat              = nc_dat[181:432,] 
   ncm_dat             = matrix(nc_dat, ncol=1)
+  
+  if(h_vnam %in% last_hlm1d){h_mult=1.}else{h_mult=h_mult} #update h_mult to 1 to skip unit conversion for monthly variables
   
   hlm1d[[h_vnam]]       = h_add0 + h_mult * ncm_dat
   hlm1d[['ens_label']]  = rep(ens_labels,each = ntstamp_each)
@@ -1285,6 +1287,8 @@ colnames(param_survi) <- plot_names
 
 param_all = param_tbl
 colnames(param_all) = plot_names
+param_dead = param_tbl %>% filter(survi_mark=="Dided")
+colnames(param_dead) = plot_names
 
 
 p <-   ggpairs(param_survi, columns = 1:21,
@@ -1317,6 +1321,8 @@ p <-   ggpairs(param_survi, columns = 1:21,
 
 Hmisc::hist.data.frame(param_survi[c(1:2,4:21)])
 Hmisc::hist.data.frame(param_tbl[c(1:2,4:21)])
+Hmisc::hist.data.frame(param_dead[c(1:2,4:21)])
+
 
 
 ```
