@@ -92,11 +92,12 @@ home_path      = path.expand("~")
 work_path      = file.path(home_path,"Documents","CA-grassland-simuDoc")
 parset_path    = file.path(work_path,"ensemble-param-base")
 parset_base    = "global-varying-params.csv"
+#parset_base    = "test.csv"
 parcorr_base   = "parameter-corr.csv"
 ncdf4_in_path  = file.path(home_path,"Documents","CA-grassland-simuDoc","ensemble-param-base")
 ncdf4_in_base  = c("fates_c3g_avba_base1.nc","fates_c3g_brdi_base2.nc","fates_c3g_genl_base3.nc") #for parallel ensemble
 ncdf4_out_path = file.path(work_path,"EnsembleParamSet","general-allom-group-params")
-ncdf4_out_pref = substr(ncdf4_in_base[3],11,20)
+ncdf4_out_pref = substr(ncdf4_in_base[2],11,20)
 n_pft=1
 #---~---
 
@@ -120,10 +121,10 @@ n_pft=1
 #                   give up until convergence, but this risks running indefinitely in case
 #                   the method fails to converge.
 #---~---
-n_ensemble     = 32 # Number of ensemble realisations
+n_ensemble     = 1500 # Number of ensemble realisations
 tasks_per_node = 36  # Ensemble realisations per node (job)
 seed_init      = 6
-lhs_eps        = 0.01
+lhs_eps        = 0.025
 lhs_maxIt      = 1000L
 #---~---
 
@@ -386,7 +387,7 @@ if (is.na(parcorr_file)){
                      )#end LHS
    #---~---
 }#end if (sample_method %in% "default")
-#---~---
+ #---~---
 
 
 

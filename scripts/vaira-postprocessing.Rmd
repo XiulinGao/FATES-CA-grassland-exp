@@ -147,7 +147,7 @@ gg_dstat_thick = 0.1      # Thickess for the drought-deciduous status band in th
 ens_colour  =  c("#E69F00", "#56B4E9", "#CC79A7",
                 "#F0E442", "#0000FF", "#00B286")
 top12 <- c("#88CCEE", "#CC6677", "#DDCC77", "#117733", "#332288", "#AA4499", 
-                             "#44AA99", "#999933", "#882255", "#661100", "#6699CC", "#888888")
+                             "#44AA99", "#999933", "#882255", "#6699CC", "#888888", "#661100")
 site_colour  = "#000000"
 
 ndevice = length(gg_device)
@@ -174,6 +174,7 @@ source(file.path(util_path,"load.everything.r"),chdir=TRUE)
 ```{r,label="extra-packages",message=FALSE,results='hide'}
 library(GGally)
 library(splines)
+library(corrplot)
 
 ```
 
@@ -592,20 +593,13 @@ if ("nc_conn" %in% ls()){dummy = nc_close(nc_conn); rm(nc_conn)}
  # w_year       = year(each_tstamp[w])
   
   # Find conversion factors for monthly variables.
-  # we skip unit conversion for variables where f_mult is 
-  # cmon.sec as we cannot find cmon.sec w/o reading time slice one by one
-  # so we change f_mult for those variables in hlm_varlist.r to 1.
-  # and use mutate() to do unit conversion once we have the entire 
-  # dataset with time column appended. 
-  # these variables include: qdirect_throughfall,qdrai,qdrip,qevtr
-  # qintr,qover,qsoil,qvege,qvegt,rain,the goal is to convert those to mm/month
-  # by multiplying seconds/month
   
-   cmon.day = days_in_month(each_tstamp[w])
+   cmon.day = days_in_month(each_tstamp)
    cmon.hr  = day.hr  * cmon.day
    cmon.min = day.min * cmon.day
    cmon.sec = day.sec * cmon.day
-last_hlm1d  = hlm1dvar$vnam[hlm1dvar$mult=="cmon.sec"] 
+   cmon.sec = rep(cmon.sec,time=ninst)
+#last_hlm1d  = hlm1dvar$vnam[hlm1dvar$mult=="cmon.sec"] 
   
 # Open NetCDF connection and retrieve variable names
 nc_conn  = nc_open(case_file)
@@ -697,18 +691,18 @@ for (p in sequence(nbypft-n_varpft_last)){
       nc_dat = matrix(nc_dat,ncol=npfts)
       bypft[[f_vnam]][] = nc_dat
       }
-      
-    # Loop through variables to be added last
-   for (v in which(varpft_last)){
-      # Retrieve variable and build understory and canopy variables.
-      v_vnam = fatesvar$vnam[v]
-      v_vund = paste0(v_vnam,"_ustory")
-      v_vcan = paste0(v_vnam,"_canopy")
+}#end for (p in sequence(nbypft-n_varpft_last))
 
-      # Aggregate data
-      bypft[[v_vnam]] = bypft[[v_vund]] + bypft[[v_vcan]]
+# Loop through variables to be added last
+for (v in which(varpft_last)){
+      # Retrieve variable and build understory and canopy variables.
+    v_vnam = fatesvar$vnam[v]
+    v_vund = paste0(v_vnam,"_ustory")
+    v_vcan = paste0(v_vnam,"_canopy")
+
+  # Aggregate data
+   bypft[[v_vnam]] = bypft[[v_vund]] + bypft[[v_vcan]]
    }#end for (v in which(varpft_last))
-}#end for (d in sequence(nbydbh-laidbh_last))
 
 
  # Read drought-deciduous phenology variables (by PFT), and assign current values to the matrix.
@@ -738,7 +732,7 @@ for (v in sequence(nhlm1d-etr_last-er_last)){
   nc_dat              = nc_dat[181:432,] 
   ncm_dat             = matrix(nc_dat, ncol=1)
   
-  if(h_vnam %in% last_hlm1d){h_mult=1.}else{h_mult=h_mult} #update h_mult to 1 to skip unit conversion for monthly variables
+ # if(h_vnam %in% last_hlm1d){h_mult=1.}else{h_mult=h_mult} #update h_mult to 1 to skip unit conversion for monthly variables
   
   hlm1d[[h_vnam]]       = h_add0 + h_mult * ncm_dat
   hlm1d[['ens_label']]  = rep(ens_labels,each = ntstamp_each)
@@ -966,18 +960,13 @@ bysoi$soi = as.integer(bysoi$soi)
 
 
 
-```{r,label="unit-conversion-for-hlm1dvar",message=FALSE,results='hide'}
+```{r,label="add-time-hlm1dvar",message=FALSE,results='hide'}
 
-cvt_var = hlm1dvar$vnam[hlm1dvar$unit=="mmomo"]
-var     = names(hlm1d)[names(hlm1d)%in%cvt_var]
+#cvt_var = hlm1dvar$vnam[hlm1dvar$unit=="mmomo"]
+#var     = names(hlm1d)[names(hlm1d)%in%cvt_var]
 hlm1d   = hlm1d                                          %>% 
-          mutate( time     = rep(each_tstamp,time=ninst)
-                 ,cmon.day = days_in_month(time)
-                 ,cmon.sec = day.sec * cmon.day) 
-hlm1d =  hlm1d  %>% 
-         mutate_at(vars(var), function(x) x*hlm1d$cmon.sec)
+          mutate( time     = rep(each_tstamp,time=ninst))
           
-  
 
 ```
 
@@ -1645,18 +1634,19 @@ survi_all  = survi_peak                     %>%
              left_join(param_survi,by="ens_label")
              
                
-cor_survi   = survi_all[c(7,11:15, 17:21,23:33,36:39)] 
+cor_survi   = survi_all[c(7,11:15, 17:20,22:33,36:39)] 
 
 cor_allens   = all_mmean                            %>% 
                filter(month==4)                     %>% 
                left_join(param_tbl,by="ens_label")  
-cor_allens  = cor_allens[c(7,11:15, 17:21,23:33,36:39)]
+cor_allens  = cor_allens[c(7,11:15, 17:20,22:33,36:39)]
                
 
 nam = names(cor_survi)
 nam = gsub("fates_",replacement="",x=nam)
 colnames(cor_survi) <- nam
 colnames(cor_survi) <- nam
+colnames(cor_allens) <- nam
 
 pairs(cor_survi) +
   theme_grey( base_size = 40, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5) +
@@ -1671,12 +1661,41 @@ pairs(cor_survi) +
 
 corr_surviens     = cor(cor_survi)
 corr_allens       =cor(cor_allens)
-corrplot::corrplot(corr_surviens
+
+png(file=file.path(plot_main,"correlation-all.png"),
+width=11,height=8,units="in",res=600)
+
+corrplot(corr_allens
                 ,method = "color"
-                ,addCoef.col="grey"
-                ,order = "AOE"
-                ,number.cex=1.3
-                ,tl.cex = 2)
+                ,type="upper"
+                ,addCoef.col="grey50"
+                #,addCoefasPercent=TRUE
+                #,cl.pos="n"
+                ,order = "original"
+                #,diag=FALSE
+                ,number.cex=0.55
+                ,tl.cex = 1
+                ,tl.col="black"
+                ,cl.cex=1)
+dev.off()
+
+png(file=file.path(plot_main,"correlation-survi.png"),
+width=11,height=8,units="in",res=600)
+
+corrplot(corr_surviens
+                ,method = "color"
+                ,type="upper"
+                ,addCoef.col="grey50"
+                ,order = "original"
+                #,diag  = FALSE
+                ,number.cex=0.55
+                ,tl.cex = 1
+                ,tl.col="black"
+                ,cl.cex=1)
+dev.off()
+
+
+
 
 ```
 
@@ -1754,7 +1773,7 @@ if (plot_top10){
                        , device   = gg_device[d]
                        , path     = tsmort_path
                        , width    = gg_width*2
-                       , height   = gg_height*2
+                       , height   = gg_height*2.5
                        , units    = gg_units
                        , dpi      = gg_depth
                        )#end ggsave
@@ -1770,7 +1789,7 @@ if (plot_top10){
 # In case we are to plot mortality by type and PFT, reorganise mortality data.
 if (plot_mort_pft){
    # Re-order mortality so it becomes all in one tibble.
-   mortens = mort_btpft                                                             %>% 
+   mortens = mort_bypft                                                             %>% 
              mutate_at(all_of(mortvar$vnam), ~ find_mort(x=.x,n=.data$fates_nplant)) %>%
              select_at(all_of(c("case","ens_label","pft","time",mortvar$vnam))) %>%
              pivot_longer(cols=mortvar$vnam,names_to="mtype",values_to="mortality") %>%

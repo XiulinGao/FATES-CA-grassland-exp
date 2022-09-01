@@ -58,21 +58,20 @@ First, we define the case:
 **Note**. Regardless of `tstampa`, we will always read in the very first file to retrieve some data that are only written in the first output.
 
 ```{r, label='case-settings'}
-#case_name  = c("fire1PFT_30S3C_CLM_FATES","fire1PFT_40S30C_CLM_FATES", "fire1PFT_40S30Csrt_CLM_FATES",
-               #"fire1PFT_52S10C_CLM_FATES", "fire1PFT_52S10Csrt_CLM_FATES","fire1PFT_evghi_CLM_FATES")     # Simulation path
+
+# Simulation path
 case_name = c("sapwood-allom-test_CLM_FATES")
-case_desc  = "sapwood allometry diagnose" # Simulation description
-#case_label = c("30S3C", "40S30C","40S30Csrt", "52S10C", "52S10Csrt","30S13C")
+case_desc  = "sapwood allometry diagnose" 
+case_label=c( "Gresp-seedmort0-sedalloc07-cstor1-SLA002-Vcmax60-allbsap")  
+
 case_colour  = c("#E69F00", "#56B4E9", "#CC79A7",
                 "#F0E442", "#0000FF", "#00B286", "#8F9900", "#997000")  #set plot color for different case
 site_colour="#000000"
                 #"#CC79A7","#F0E442", "#0000FF", "#00B286") 
-case_label=c( "Gresp-seedmort0-sedalloc07-cstor1-SLA002-Vcmax60-allbsap")  
 
-tstampa    = "01/01/2000"# "01/01/2004"         # First time (MM/DD/YYYY)
-tstampz    = "12/01/2020" # "12/01/2019"         # Last time (MM/DD/YYYY)
 
-readtime   = TRUE  # use this logic flag to indicate whether we are reading files one by one, used in unit conversion for monthly                     # hlm1d variables, see line 816-818
+tstampa    = "01/01/2000" # First time (MM/DD/YYYY)
+tstampz    = "12/01/2020" # Last time (MM/DD/YYYY)
 
 ```
 
@@ -129,8 +128,9 @@ n            = n + 1
 pftinfo[[n]] = list( id     = 1
                    , key    = "pft1"
                    , short  = "Pooideae"
-                   , desc   = "C3 decid grass"
+                   , desc   = "C3 drought decid grass"
                    , colour = "#00BFC4"
+                   , parse  ="D*e*c*i*d[Non-h*y*d*r*o]"
                    )#end list
 #n            = n + 1
 #pftinfo[[n]] = list( id     = 2
@@ -394,23 +394,37 @@ for (v in sequence(nc_nvars)) nc_vlist[v] = nc_conn$var[[v]]$name
 # Gather dimension information, then initialise matrices
 #---~---
 
-# as 2 simulations have exact same outputs, size and age class, so we just use one to initialize each
 # List of age classes
 idxage   = match("fates_levage",nc_dlist)
 if (is.finite(idxage)){
    ages     = nc_conn$dim[[idxage]]$vals
    nages    = nc_conn$dim[[idxage]]$len
-   agekeys  = sprintf("age_%3.3i",ages)
-   agelabs  = c( paste0("paste(",ages[-nages],"-",ages[-1],")")
-               , paste0("paste(",ages[nages],"-infinity)")
-               )#end c
-   agelabs  = parse(text=agelabs)
+
+   ageinfo  = tibble( id      = sequence(nages)
+                    , age_lwr = ages
+                    , age_upr = c(ages[-1],Inf)
+                    , key     = sprintf("age_%3.3i",ages)
+                    , desc    = c( paste0("paste(paste(",age_lwr[-nages],"<= A*g*e)<",age_upr[-nages],"*y*r)")
+                                 , paste0("paste( A*g*e >=",age_upr[nages],"*y*r)")
+                                 )#end c
+                    , labs    = c( paste0("paste(",age_lwr[-nages],"-",age_upr[-nages],")")
+                                 , paste0("paste(",age_lwr[ nages],"-infinity)")
+                                 )#end c
+                    , colour  = viridis(nages,option="D",direction=-1)
+                    )#end tibble
 }else{
-   ages     = numeric(0L)
-   nages    = 0L
-   agekeys  = character(0L)
-   agelabs  = character(0L)
+   ageinfo  = tibble( id      = integer(0L)
+                    , age_lwr = numeric(0L)
+                    , age_upr = numeric(0L)
+                    , key     = character(0L)
+                    , desc    = character(0L)
+                    , labs    = character(0L)
+                    , colour  = character(0L)
+                    )#end tibble
 }#end if (is.na(idxage))
+
+# Set number of age classes
+nages = nrow(ageinfo)
 
 
 # List of size classes
@@ -418,17 +432,32 @@ idxdbh   = match("fates_levscls",nc_dlist)
 if (is.finite(idxdbh)){
    dbhs     = nc_conn$dim[[idxdbh]]$vals
    ndbhs    = nc_conn$dim[[idxdbh]]$len
-   dbhkeys  = sprintf("dbh_%3.3i",dbhs)
-   dbhlabs  = c( paste0("paste(",dbhs[-ndbhs],"-",dbhs[-1],")")
-               , paste0("paste(",dbhs[ndbhs],"-infinity)")
-               )#end dbhlabs
-   dbhlabs  = parse(text=dbhlabs)
+   dbhinfo  = tibble( id      = sequence(ndbhs)
+                    , dbh_lwr = dbhs
+                    , dbh_upr = c(dbh_lwr[-1],dbh_lwr[ndbhs]+2*max(diff(dbh_lwr)))
+                    , dbh     = 0.5 * (dbh_lwr + dbh_upr)
+                    , key     = sprintf("dbh_%3.3i",dbh_lwr)
+                    , desc    = c( paste0("paste(paste(",dbh_lwr[-ndbhs],"<=D*B*H)<",dbh_upr[-ndbhs],"*c*m)")
+                                 , paste0("paste( D*B*H >=",dbh_lwr[ndbhs],"*c*m)")
+                                 )#end c
+                    , labs    = c( paste0("paste(",dbh_lwr[-ndbhs],"-",dbh_upr[-ndbhs],")")
+                                 , paste0("paste(",dbh_lwr[ ndbhs],"-infinity)")
+                                 )#end dbhlabs
+                    , colour   = magma(ndbhs,direction=1)
+                    )#end tibble
 }else{
-   dbhs    = numeric(0L)
-   ndbhs   = 0L
-   dbhkeys = character(0L)
-   dbhlabs = character(0L)
+   dbhinfo  = tibble( id      = integer(0L)
+                    , dbh_lwr = numeric(0L)
+                    , dbh_upr = numeric(0L)
+                    , key     = character(0L)
+                    , desc    = character(0L)
+                    , labs    = character(0L)
+                    , colour  = character(0L)
+                    )#end tibble
 }#end if (is.finite(idxdbh))
+
+# Set number of size classes
+ndbhs = nrow(dbhinfo)
 
 # List of PFT classes (only if not using user-defined classes).
 idxpft   = match("fates_levpft",nc_dlist)
@@ -438,8 +467,8 @@ if (! is.finite(idxpft)){
                    , key              = character(0L)
                    , short            = character(0L)
                    , desc             = character(0L)
+                   , parse            = character(0L)
                    , colour           = character(0L)
-                   , stringsAsFactors = FALSE
                    )#end data.table
 }else if (! user_pftinfo){
    # Select all PFTs available
@@ -451,8 +480,8 @@ if (! is.finite(idxpft)){
                    , key              = sprintf("pft%2.2i" ,pftids)
                    , short            = sprintf("PFT%2.2i" ,pftids)
                    , desc             = sprintf("PFT %2.2i",pftids)
+                   , parse            = paste0("P*F*T*phantom(1)*",sprintf("%2.2i",pftids))
                    , colour           = brewer.pal(n=npftids,name="PuBuGn")
-                   , stringsAsFactors = FALSE
                    )#end tibble
 }else if (! is_tibble(pftinfo)){
    # Convert user-defined pftinfo to a "tibble" object
@@ -461,6 +490,7 @@ if (! is.finite(idxpft)){
 
 # Set number of PFTs (active PFTs only) 
 npfts = nrow(pftinfo)
+
 
 # List of soil layer
 idxsoi   = match("levgrnd",nc_dlist)
@@ -500,18 +530,31 @@ nc_pref   = tolower(nc_pref)
 nc_keep   = (nc_pref %in% fatesvar$vnam) & (! duplicated(nc_pref))
 no_bydbh  = nc_bydbh[! nc_keep]
 nc_bydbh  = unique(nc_bydbh[  nc_keep])
-if (  all(c("FATES_LAI_USTORY_SZ","FATES_LAI_CANOPY_SZ") %in% nc_bydbh)
-   && (! "FATES_LAI_SZ" %in% nc_bydbh) ){
-   nc_bydbh    = unique(c(nc_bydbh,"FATES_LAI_SZ"))
-   laidbh_last = TRUE
-}else if (  all(c("FATES_LAI_USTORY_SZPF","FATES_LAI_CANOPY_SZPF") %in% nc_bydbh)
-   && (! "FATES_LAI_SZPF" %in% nc_bydbh) ){
-   nc_bydbh    = unique(c(nc_bydbh,"FATES_LAI_SZPF"))
-   laidbh_last = TRUE
-}else{
-   laidbh_last = FALSE
-}#end if (  all(c("LAI_UNDERSTORY_SCLS","LAI_CANOPY_SCLS") %in% nc_bydbh)
-nbydbh    = length(nc_bydbh)
+
+
+vardbh_last = rep(x=FALSE,times=nfatesvar)
+for (v in which(fatesvar$is_upc)){
+   nc_vnow      = toupper(fatesvar$vnam[v])
+   nc_vnow_scls = paste0(nc_vnow,"_SCLS")
+   nc_vund_scls = paste0(nc_vnow,"_UNDERSTORY_SCLS")
+   nc_vcan_scls = paste0(nc_vnow,"_CANOPY_SCLS")
+   nc_vnow_scpf = paste0(nc_vnow,"_SCPF")
+   nc_vund_scpf = paste0(nc_vnow,"_UNDERSTORY_SCPF")
+   nc_vcan_scpf = paste0(nc_vnow,"_CANOPY_SCPF")
+
+   # Check whether this variable can be derived from understorey+canopy (and needs to be).
+   if ( all(c(nc_vund_scls,nc_vcan_scls) %in% nc_bydbh ) && (! nc_vnow_scls %in% nc_bydbh) ){
+      nc_bydbh       = unique(c(nc_bydbh,nc_vnow_scls))
+      vardbh_last[v] = TRUE
+   }else if ( all(c(nc_vund_scpf,nc_vcan_scpf) %in% nc_bydbh ) && (! nc_vnow_scpf %in% nc_bydbh) ){
+      nc_bydbh       = unique(c(nc_bydbh,nc_vnow_scpf))
+      vardbh_last[v] = TRUE
+   }#end if ( all(c(nc_vund_scls,nc_vcan_scls) %in% nc_bydbh ) && (! nc_vnow_scls %in% nc_bydbh) )
+}#end for (v in which(fatesvar$is_upc))
+
+# Tally the total number of DBH variables, and derived variables.
+nbydbh        = length(nc_bydbh)
+n_vardbh_last = sum(vardbh_last)
 
     
 #---~---
@@ -528,14 +571,23 @@ nc_keep   = nc_pref %in% fatesvar$vnam & (! duplicated(nc_pref))
 no_bypft  = nc_bypft[! nc_keep]
 nc_bypft  = unique(nc_bypft[  nc_keep])
 
-if (  all(c("FATES_LAI_USTORY_SZPF","FATES_LAI_CANOPY_SZPF") %in% nc_bypft)
-   && (! "FATES_LAI_SZPF" %in% nc_bypft) ){
-   nc_bypft    = unique(c(nc_bypft,"FATES_LAI_SZPF"))
-   laipft_last = TRUE
-}else{
-   laipft_last = FALSE
-}#end if (  all(c("LAI_UNDERSTORY_SCPF","LAI_CANOPY_SCPF") %in% nc_bypft)
+varpft_last = rep(x=FALSE,times=nfatesvar)
+for (v in which(fatesvar$is_upc)){
+   nc_vnow      = toupper(fatesvar$vnam[v])
+   nc_vnow_scpf = paste0(nc_vnow,"_SZPF")
+   nc_vund_scpf = paste0(nc_vnow,"_USTORY_SZPF")
+   nc_vcan_scpf = paste0(nc_vnow,"_CANOPY_SZPF")
+
+   # Check whether this variable can be derived from understorey+canopy (and needs to be).
+   if ( all( c(nc_vund_scpf,nc_vcan_scpf) %in% nc_bypft ) && (! nc_vnow_scpf %in% nc_bypft) ){
+      nc_bypft       = unique(c(nc_bypft,nc_vnow_scpf))
+      varpft_last[v] = TRUE
+   }#end if ( all(c(nc_vund_scls,nc_vcan_scls) %in% nc_bydbh ) && (! nc_vnow_scls %in% nc_bydbh) )
+}#end for (v in which(fatesvar$is_upc))
+
+# Tally the total number of PFT variables, and derived variables.
 nbypft    = length(nc_bypft)
+n_varpft_last = sum(varpft_last)
 
 
 
@@ -579,7 +631,7 @@ for (n in sequence(ncase)){
       nc_pref         = tolower(gsub(pattern="_AP$",replacement="",x=nc_nvnow))
       f               = match(nc_pref,fatesvar$vnam)
       f_vnam          = fatesvar$vnam[f]
-      byage[[liname]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp,ncol=nages,dimnames=list(NULL,agekeys))
+      byage[[liname]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp,ncol=nages,dimnames=list(NULL,ageinfo$key))
    }#end for (a in sequence(nbyage))
 }
 
@@ -594,7 +646,7 @@ for(n in sequence(ncase)){
       nc_pref         = tolower(nc_pref)
       f               = match(nc_pref,fatesvar$vnam)
       f_vnam          = fatesvar$vnam[f]
-      bydbh[[liname]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp,ncol=ndbhs,dimnames=list(NULL,dbhkeys))
+      bydbh[[liname]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp,ncol=ndbhs,dimnames=list(NULL,dbhinfo$key))
    }#end for (d in sequence(nbydbh))
 }
 
@@ -643,17 +695,18 @@ for (n in sequence(ncase)){
 # do a loop to avoid hard-coding here 
 cat0("   - Load soil information")
 slayer = tibble()
+
 for (n in sequence(ncase)) {
 nc_conn  = nc_open(filename=nc_zero[n])
 case = cnames[n]
-slayer_now = tibble( zsoi   = c(unlist(ncvar_get(nc=nc_conn, varid='ZSOI'))) #,unlist(ncvar_get(nc=nc_connfull,varid='ZSOI' )))
-               , dzsoi  = c(unlist(ncvar_get(nc=nc_conn,varid='DZSOI' ))) #, unlist(ncvar_get(nc=nc_connfull,varid='DZSOI' )))
-               , bsw    = c(unlist(ncvar_get(nc=nc_conn,varid='BSW' ))) #, unlist(ncvar_get(nc=nc_connfull,varid='BSW' )))
-               , hksat  = c(unlist(ncvar_get(nc=nc_conn,varid='HKSAT' ))) #, unlist(ncvar_get(nc=nc_connfull,varid='HKSAT' )))
-               , sucsat = c(unlist(ncvar_get(nc=nc_conn,varid='SUCSAT' ))) #, unlist(ncvar_get(nc=nc_connfull,varid='SUCSAT' )))
-               , watsat = c(unlist(ncvar_get(nc=nc_conn,varid='WATSAT' ))) #, unlist(ncvar_get(nc=nc_connfull,varid='WATSAT' )))
+slayer_now = tibble( zsoi   = c(unlist(ncvar_get(nc=nc_conn, varid='ZSOI'))) 
+               , dzsoi  = c(unlist(ncvar_get(nc=nc_conn,varid='DZSOI' ))) 
+               , bsw    = c(unlist(ncvar_get(nc=nc_conn,varid='BSW' )))  
+               , hksat  = c(unlist(ncvar_get(nc=nc_conn,varid='HKSAT' ))) 
+               , sucsat = c(unlist(ncvar_get(nc=nc_conn,varid='SUCSAT' )))  
+               , watsat = c(unlist(ncvar_get(nc=nc_conn,varid='WATSAT' )))  
                , case  = c(rep_along(zsoi, case))
-               )#end data.table'
+               )#end tibble
    slayer = rbind(slayer, slayer_now)
    rm(slayer_now)
 }
@@ -687,6 +740,7 @@ Besides variables that exist in the FATES output files, the following variables 
 
 ```{r, label='load-times', message=FALSE}
 if ("nc_conn" %in% ls()){dummy = nc_close(nc_conn); rm(nc_conn)}
+
 for (n in sequence(ncase)){
    case = cnames[n]
    for (w in sequence(ntstamp)){
@@ -705,10 +759,7 @@ for (n in sequence(ncase)){
    cmon.hr  = day.hr  * cmon.day
    cmon.min = day.min * cmon.day
    cmon.sec = day.sec * cmon.day
-   monthvar = c("qdirect_throughfall","qdrai","qdrip",
-                "qevtr","	qintr","qover","qsoil","qvege",
-                "qvegt","rain")
-  
+   
    # Open NetCDF connection and retrieve variable names
    nc_conn  = nc_open(filename=nc_file)
    nc_nvars = nc_conn$nvars
@@ -735,7 +786,7 @@ for (n in sequence(ncase)){
    # is in the list and it is the last variable, we calculate it from canopy and under
    # storey, after loading all variables
    #---~---
-   for (d in sequence(nbydbh-laidbh_last)){
+   for (d in sequence(nbydbh-n_vardbh_last)){
       nc_nvnow            = nc_bydbh[d]
       is_szpf             = grepl(pattern="_SZPF$",x=nc_nvnow)
       nc_pref             = gsub(pattern="_SZPF$",replacement="",x=nc_nvnow)
@@ -763,10 +814,16 @@ for (n in sequence(ncase)){
       }#end if (is_scpf)
    }#end for (d in sequence(nbydbh-laidbh_last))
 
-   # Find total LAI if sought.
-   if (laidbh_last){
-      bydbh[[case]]$fates_lai[w,] = bydbh[[case]]$fates_lai_canopy[w,] + bydbh[[case]]$fates_lai_ustory[w,]
-   }#end if (lai.last)
+   # Loop through variables to be added last
+   for (v in which(vardbh_last)){
+      # Retrieve variable and build understory and canopy variables.
+      v_vnam = fatesvar$vnam[v]
+      v_vund = paste0(v_vnam,"_ustory")
+      v_vcan = paste0(v_vnam,"_canopy")
+
+      # Aggregate data
+      bydbh[[v_vnam]][w,] = bydbh[[v_vund]][w,] + bydbh[[v_vcan]][w,]
+   }#end for (v in which(vardbh_last))
 
 
 
@@ -775,7 +832,7 @@ for (n in sequence(ncase)){
    # is in the list and it is the last variable, we calculate it from canopy and under
    # storey, after loading all variables
    #---~---
-   for (p in sequence(nbypft-laipft_last)){
+   for (p in sequence(nbypft-n_varpft_last)){
       # Load variable information
       nc_nvnow = nc_bypft[p]
       is_szpf  = grepl(pattern="_SZPF$",x=nc_nvnow)
@@ -797,12 +854,18 @@ for (n in sequence(ncase)){
       }else{
        bypft[[case]][[f_vnam]][w,] = nc_dat
       }
-      
-     if (laipft_last){
-      bypft[[case]]$fates_lai[w,] = bypft[[case]]$fates_lai_canopy[w,] + bypft[[case]]$fates_lai_ustory[w,]
-   }#end if (laipft_last)
+   }#end for (p in sequence(nbypft-n_varpft_last))
+   
+   # Loop through variables to be added last
+   for (v in which(varpft_last)){
+      # Retrieve variable and build understory and canopy variables.
+      v_vnam = fatesvar$vnam[v]
+      v_vund = paste0(v_vnam,"_ustory")
+      v_vcan = paste0(v_vnam,"_canopy")
 
-   }#end for (d in sequence(nbydbh-laidbh_last))
+      # Aggregate data
+      bypft[[case]][[v_vnam]][w, ] = bypft[[case]][[v_vund]][w, ] + bypft[[case]][[v_vcan]][w, ]
+   }#end for (v in which(varpft_last))
 
     
    # Read 1D variables  
@@ -812,9 +875,7 @@ for (n in sequence(ncase)){
       h                   = match(nc_pref,hlm1dvar$vnam)
       h_vnam              = hlm1dvar$vnam[h]
       h_add0              = eval(parse(text=hlm1dvar$add0[h]))
-       if(readtime & h_vnam %in% monthvar){
-       h_mult = cmon.sec
-       }else{h_mult              = eval(parse(text=hlm1dvar$mult[h]))  }
+      h_mult              = eval(parse(text=hlm1dvar$mult[h]))  
      
       nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
       if (n==1){
@@ -999,16 +1060,7 @@ for(n in sequence(ncase)){
 rm(dbh_melt)
 
 dbh_melt = do.call(rbind, dbhlist)
-# Remove rows that are all zeros
-#dbh_meltnz <- dbh_melt %>% filter(if_any(where(is.numeric), ~.x != 0))
-#dbh_nz <- as.character(unique(dbh_meltnz$dbh))
-#f <- match(dbh_nz, dbhkeys)
-#dbhs_nz <- sort(dbhs[f])
-#ndbhs_nz <- length(dbh_nz)
-#dbhkeys_nz <- sprintf("dbh_%3.3i", dbhs_nz)
-#dbhlabs_nz <- c(paste0("paste(",dbhs_nz[-ndbhs_nz], "-", dbhs_nz[-1], ")"),
-#                paste0("paste(", dbhs_nz[ndbhs_nz], "-", "-infinity)"))
-#dbhlabs_nz <- parse(text=dbhlabs_nz)
+
 
 #--- Turn PFT-dependent matrices into data tables
 cat0(" + Turn PFT-dependent matrices into data tables.")
@@ -1097,29 +1149,9 @@ byage = age_melt
 bydbh = dbh_melt
 bypft = pft_melt
 bysoi = soi_melt
-#byage_nz = age_meltnz
-#bydbh_nz = dbh_meltnz
+
 rm(age_melt,dbh_melt,pft_melt, soi_melt)
 #---~---
-#--- mutate all mortality into fraction by dividing each by nplant
-#bypft = bypft %>% mutate(  m1 = m1/nplant
-#                         , m2 = m2/nplant
-#                         , m3 = m3/nplant
-#                         #, m5 = m5/nplant
-#                         , m6 = m6/nplant
-#                         , m9 = m9/nplant
-#                         , mortality_canopy = mortality_canopy/nplant_canopy
-#                         , mortality_understory = mortality_understory/nplant_understory)
-
-#bydbh = bydbh %>% mutate(  m1 = m1/nplant
-#                         , m2 = m2/nplant
-#                         , m3 = m3/nplant
-                         #, m5 = m5/nplant
-#                         , m6 = m6/nplant
-#                         , m9 = m9/nplant
-#                         , mortality_canopy = mortality_canopy/nplant_canopy
-#                         , mortality_understory = mortality_understory/nplant_understory)
-
 
 #--- Convert dbh and age classes into integers
 cat0(" + Convert classes to integers.")
@@ -1149,10 +1181,6 @@ emean_soi10 = bysoi                                                       %>%
               filter(soi %in% sl)                                         %>% 
               dplyr::select(!c(soi, dzsoi))                               %>% 
               group_by(time, case)                                        %>% 
-              #mutate(sdzsoi = sum(dzsoi, na.rm=TRUE))                     %>% 
-              #mutate(dzsoi = dzsoi/sdzsoi)                                %>% 
-              #mutate(h2osoi = h2osoi*dzsoi)                               %>% 
-              #select(!c(sdzsoi, dzsoi) )                                  %>% 
               summarise_all(mean, na.rm=TRUE)                             %>% 
               ungroup()     
               
