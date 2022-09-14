@@ -1255,10 +1255,16 @@ ntstamp_com = length(tstamp_com)
 #join agb and lai
 
 lai = fread(lai_path)
-lai = lai %>% mutate(LAI_DATE = ymd(LAI_DATE),
-                     year     = year(LAI_DATE),
-                     month    = month(LAI_DATE)) %>% dplyr::select(-LAI_DATE)
-colnames(lai) <- c("elai","elai_sd","year","month")
+lai = lai                                %>% 
+      mutate(LAI_DATE = ymd(LAI_DATE)
+            ,year     = year(LAI_DATE)
+            ,month    = month(LAI_DATE)) %>% 
+      dplyr::select(-LAI_DATE)           %>% 
+      group_by(year,month)               %>% 
+      summarize_all(mean,na.rm=TRUE)     %>% 
+      filter(!is.na(year))
+
+colnames(lai) <- c("year","month","elai","elai_sd")
 agb = fread(agb_path)
 agb = agb                                 %>% 
       mutate(date       = ymd(date)
@@ -1266,23 +1272,64 @@ agb = agb                                 %>%
             ,month      = month(date)
             ,biomass    = biomass/2
             ,biomass_sd = biomass_sd/2)   %>% 
-      dplyr::select(-date)
+      dplyr::select(-date)                %>% 
+      group_by(year,month)                %>% 
+      summarise_all(mean,na.rm=TRUE)      %>% 
+      ungroup()
 
-colnames(agb) <- c("agb","agb_sd","sample","year","month")
+colnames(agb) <- c("year","month","agb","agb_sd","sample")
 
-site1d = site1d %>% 
-         mutate(year=year(time),
-                month=month(time)) %>% 
-         left_join(lai, by=c("year", "month")) %>% 
-         left_join(agb,by=c("year", "month")) %>% 
-         dplyr::select(!c(year, month))
+site1d  = site1d                              %>% 
+          mutate(year  = year(time)
+                ,month = month(time))         %>% 
+          left_join(agb,by=c("year","month")) %>% 
+          left_join(lai,by=c("year","month")) %>% 
+          dplyr::select(-c(agb_sd,sample,elai_sd))
+  
+
+site_mmean = site1d                          %>% 
+             dplyr::select(-c(year,time))    %>% 
+             group_by(month)                 %>% 
+             summarise_all(mean,na.rm=TRUE)  %>% 
+             ungroup()                       
+#upper and lower range of site observations
+rena_vars = names(site_mmean)[-1] 
+site_mupr = site1d                                                            %>% 
+            mutate(month = month(time))                                       %>% 
+            group_by(month)                                                   %>%
+            dplyr::select(-c(year,time))                                      %>%  
+            summarise_all(quantile,probs=qupr_ribbon,names=FALSE, na.rm=TRUE) %>%
+            ungroup()                                                         %>%
+             
+            rename_at(vars(rena_vars),function(x) paste0(x,"_qupr"))
+
+site_mlwr = site1d                                                            %>% 
+            mutate(month = month(time))                                       %>% 
+            group_by(month)                                                   %>%
+            dplyr::select(-c(year,time))                                      %>%   
+            summarise_all(quantile,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE) %>%
+            ungroup()                                                         %>% 
+            rename_at(vars(rena_vars),function(x) paste0(x,"_qlwr"))
+
+site_mmean = merge(x=site_mmean,y=merge(x=site_mupr,y=site_mlwr,by="month")
+                  ,by="month")      
+
 
 ## use allometric relationship to estimate NPP at site 
 ## fine root for mature BRDI2 (dbh > 4) is about 20% of AGB
 ## so NPP can be estimated as 1.2*AGB (in KG C/m2, need to convert to g C/m2/day)
-site1d = site1d %>% 
-         mutate(npp = 1.2*agb*kg2g/yr.day
-               ,cue = npp/gpp)
+cue_obs = site1d                              %>% 
+          mutate(year  = year(time)
+                ,month = month(time))         %>% 
+          mutate(npp = 1.2*agb*kg2g/yr.day
+                ,cue = npp/gpp)
+
+
+#have to rename gpp and agb so names match for making seasonal dynamic plots
+site_var = names(site_mmean)
+site_var = gsub(pattern="gpp",replacement="fates_gpp",x=site_var)
+site_var = gsub(pattern="agb",replacement="fates_vegc_aboveground",x=site_var)
+names(site_mmean) = site_var
 
 
 ```
@@ -1565,8 +1612,8 @@ plot_df = survi_ens %>% dplyr::select(fates_gpp,fates_npp,case,ens_label,case_en
 
 plot_df = plot_df %>% group_by(case,ens_label,case_ens,month) %>% 
           summarise_all(mean) %>% ungroup()
-ob_cue  = site1d %>% mutate(month = month(time)) %>% 
-          filter(month %in% c(4,5))
+cue_obs = cue_obs                    %>% 
+          filter(month %in% c(3,4,5))
 cat0("+ Plot carbon use efficiency")
 ggplot(plot_df, aes(fates_gpp,fates_npp)) +
   geom_point(aes(colour="Model")) +
@@ -1574,7 +1621,7 @@ ggplot(plot_df, aes(fates_gpp,fates_npp)) +
   labs(x=expression("GPP ("~gC~m^-2~day^-1~")"),
        y=expression("NPP ("~gC~m^-2~day^-1~")"))+
   geom_abline(slope = 1, intercept = 0,lwd=1,linetype="dashed")+
-  geom_point(data=ob_cue,aes(gpp,npp,colour="Site"))   +
+  geom_point(data=cue_obs,aes(gpp,npp,colour="Site"))   +
   scale_colour_manual(values=c("Model"= ens_colour[1]
                               ,"Site" = site_colour))  +
   theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,
@@ -1608,21 +1655,21 @@ hlm_scy   = hlm1d                                                               
             dplyr::select(all_of(c("case","ens_label","time",hlm_var)))            %>% 
             mutate(case_ens = paste0(case,"_",ens_label))                          %>% 
             filter(case_ens %in% survi_label)
-hlm_scy   = hlm_scy %>% 
-            rename(gpp = fates_gpp
-                  ,agb = fates_vegc_aboveground)
+siteob   = site1d %>% 
+            rename(fates_gpp              = gpp
+                  ,fates_vegc_aboveground = agb)
                   #,h2osoi = fates_meanliqvol_droughtphen)
           
-var_both = intersect(names(site1d),names(hlm_scy))
-var_both = var_both[! var_both %in% c("time","case","ens_label")]
-site1d  = site1d %>% dplyr::select( all_of(c("time",var_both)))
+var_both = intersect(names(siteob),names(hlm_scy))
+var_both = var_both[! var_both %in% "time"]
+siteob  = siteob %>% dplyr::select( all_of(c("time",var_both)))
 hlm_scy = hlm_scy %>% dplyr::select(all_of(c("time","case","ens_label",var_both))) 
 
-site1d$case      = 0L
-site1d$ens_label = "Site"
+siteob$case      = 0L
+siteob$ens_label = "Site"
 
 cat0(" + Merge data sets into a single tibble.")
-emean_com = rbind(hlm_scy,site1d) 
+emean_com = rbind(siteob,hlm_scy)
 
 mmean_com = emean_com                                                     %>%
         mutate(month = month(time))                                       %>%
@@ -1633,38 +1680,6 @@ mmean_com = emean_com                                                     %>%
 
 mmean_com = mmean_com %>% arrange(case,ens_label,month)
 
-#upper and lower range of site observations
-site_mupr = site1d                                                            %>% 
-            mutate(month = month(time))                                       %>% 
-            group_by(month,ens_label,case)                                    %>%
-            dplyr::select(-c(time))                                           %>% 
-            summarise_all(quantile,probs=qupr_ribbon,names=FALSE, na.rm=TRUE) %>%
-            ungroup()                                                         %>% 
-            rename_at(vars(var_both),function(x) paste0(x,"_qupr"))
-site_mean = site1d                                                            %>% 
-            mutate(month = month(time))                                       %>% 
-            group_by(month,ens_label,case)                                    %>%
-            dplyr::select(-c(time))                                           %>%   
-            summarise_all(mean, na.rm=TRUE)                                   %>%
-            ungroup()                                                          
-          
-
-site_mlwr = site1d                                                            %>% 
-            mutate(month = month(time))                                       %>% 
-            group_by(month,ens_label,case)                                    %>%
-            dplyr::select(-c(time))                                           %>%   
-            summarise_all(quantile,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE) %>%
-            ungroup()                                                         %>% 
-            rename_at(vars(var_both),function(x) paste0(x,"_qlwr"))
-
-site_mrange = merge(x=site_mlwr,y=merge(x=site_mean,y = site_mupr,by=c("month","ens_label","case")),
-                    by=c("month","ens_label","case"))
-
-#have to rename gpp and agb so names match for making seasonal dynamic plots
-site_var = names(site_mrange)
-site_var = gsub(pattern="gpp",replacement="fates_gpp",x=site_var)
-site_var = gsub(pattern="agb",replacement="fates_vegc_aboveground",x=site_var)
-names(site_mrange) = site_var
 
 ```
 
@@ -1677,10 +1692,7 @@ cat0(" + Plot monthly mean of variables.")
 
 #leg_colours = c(site_colour,ens_colour)
 #leg_labels  = c("Site",case_desc)
-mmean_plot  = mmean_com %>% 
-              rename(fates_gpp = gpp
-                    ,fates_vegc_aboveground = agb)
-                    #,fates_meanliqvol_droughtphen = h2osoi)
+mmean_plot  = mmean_com 
 emean_loop = which(hlm1dvar$vnam %in% hlm_var)
 
 gg_emean   = list()
@@ -1696,7 +1708,7 @@ for (h in emean_loop){
 
    mmean_now        = mmean_plot
    mmean_now        = subset(mmean_now,case!=0)
-   obs              = site_mrange %>% dplyr::select(-case)
+   obs              = site_mmean 
    #mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
    
    gg_now = ggplot(data=mmean_now)
@@ -1782,10 +1794,7 @@ cat0(" + Plot monthly mean of variables for top10 survived ensembles.")
 
 leg_colours = c(site_colour,top12[1:10])
 
-mmean_plot  = top10_mmean %>% 
-              rename(fates_gpp = gpp
-                    ,fates_vegc_aboveground = agb)
-                    #,fates_meanliqvol_droughtphen = h2osoi)
+mmean_plot  = top10_mmean 
 emean_loop = which(hlm1dvar$vnam %in% hlm_var)
 
 gg_emean   = list()
@@ -2462,4 +2471,282 @@ if(gg_screen) decomp_plot
 
 
 
+
+
+```{r,label="ensemble-filtering",message=FALSE,results='hide'}
+rm(mmean_now,mmean_plot)
+
+
+ens_filt    = mmean_com       %>% 
+              filter(case!=0) %>% 
+              rename_at(vars(names(mmean_com)[-c(1:3)])
+                       ,function(x) paste0(x,"_mod"))
+ens_filt    = ens_filt                        %>% 
+              left_join(site_mmean
+                       ,by=c("month"))        %>%       
+              filter(month %in% growing_sea)  
+
+ens_filt    = ens_filt                                   %>% 
+              mutate(month_keep = if_else(
+                     elai_mod >= elai_qlwr & elai <= elai_qupr
+                    ,"keep"
+                    ,"drop"))              
+
+ens_filt    = ens_filt                                   %>% 
+              group_by(case,ens_label)                   %>% 
+              mutate(keep_cnt = sum(month_keep=="keep")) %>% 
+              filter(keep_cnt==3)                        %>% 
+              ungroup()
+
+ens_filt    = ens_filt                        %>% 
+              mutate(month_keep = if_else(
+                     fates_gpp_mod >= fates_gpp_qlwr & fates_gpp_mod <= fates_gpp_qupr
+                    ,"keep"
+                    ,"drop")) 
+
+ens_filt    = ens_filt                                   %>% 
+              group_by(case,ens_label)                   %>% 
+              mutate(keep_cnt = sum(month_keep=="keep")) %>% 
+              filter(keep_cnt==3)                        %>% 
+              ungroup()
+
+ens_filt   = ens_filt                                    %>% 
+             mutate(month_keep = if_else(
+                    fates_vegc_aboveground_mod >= fates_vegc_aboveground_qlwr & 
+                    fates_vegc_aboveground_mod <= fates_vegc_aboveground_qupr
+                   ,"keep"
+                   ,"drop"))
+
+ens_filt    = ens_filt                                   %>% 
+              group_by(case,ens_label)                   %>% 
+              mutate(keep_cnt = sum(month_keep=="keep"
+                                   ,na.rm=TRUE))         %>% 
+              filter(keep_cnt==1)                        %>% # agb observation is only available for May 
+              ungroup()
+
+ens_filt    = ens_filt                                   %>% 
+              mutate(month_keep = if_else(
+                    eflx_lh_tot_mod >= eflx_lh_tot_qlwr & 
+                    eflx_lh_tot_mod <= eflx_lh_tot_qupr
+                   ,"keep"
+                   ,"drop"))
+
+
+ens_filt    = ens_filt                                   %>% 
+              group_by(case,ens_label)                   %>% 
+              mutate(keep_cnt = sum(month_keep=="keep"
+                                   ,na.rm=TRUE))         %>% 
+              filter(keep_cnt==3 & case %in% c(4,5,6))   %>% # we only carry ensembles from 400 co2 treatment forward
+              ungroup()                                  %>% 
+              mutate(case_ens = paste0(case,"_",ens_label))
+
+ens_keep  = unique(ens_filt$case_ens)  #only 8 members made it to the next round
+
+
+```
+
+
+
+
+
+
+```{r,label="kept-members-seasonal-dynamic",message=FALSE}
+
+keep_mmean = mmean_com                                        %>% 
+             mutate(case_ens = paste0(case,"_",ens_label))    %>% 
+             filter(case_ens %in% c("0_Site",ens_keep))
+
+keep_labels  = c("Site"
+                ,"AVBA-NoFire-400"
+                ,"BRDI-NoFire-400"
+                ,"GENL-NoFire-400")
+
+keep_colours = c(site_colour,ens_colour[1:3])
+
+keep_loop = which(hlm1dvar$vnam %in% var_both)
+
+gg_keep    = list()
+for (h in keep_loop){
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   h_vqlwr  = paste0(h_vnam,"_qlwr")
+   h_vqupr  = paste0(h_vnam,"_qupr")
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+
+   mmean_now        = keep_mmean
+   obs              = site_mmean 
+   mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
+   
+   gg_now = ggplot(data=mmean_now)
+   gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,group="case_ens",colour="case")
+                              ,lwd=0.8,alpha=0.8,show.legend=TRUE)
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",values=keep_colours,labels=keep_labels)
+   gg_now = gg_now + geom_ribbon( data = obs
+                                , aes_string(x = "month",ymin=h_vqlwr,ymax=h_vqupr)
+                                , alpha       = alpha_ribbon
+                                , inherit.aes = FALSE
+                                , colour      = "transparent"
+                                )
+   gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "right"
+                         , legend.text=element_text(size=gg_ptsz)
+                         , axis.text.x        = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         ) #end theme
+  
+ 
+   # Save plots.
+   for (d in sequence(ndevice)){
+    h_output = paste0(h_vnam,"_keep.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot     = gg_now
+                    , device   = gg_device[d]
+                    , path     = secy_path
+                    , width    = gg_widthn*0.7
+                    , height   = gg_height
+                    , units    = gg_units
+                    , dpi      = gg_depth
+                    )
+   }
+  gg_keep[[h_vnam]] = gg_now      
+
+}
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_keep
+
+
+
+
+
+
+
+```
+
+
+
+```{r,"agb-range-model-ob-compare"}
+
+one_ens = "5_node_008-task_012"
+one_emean = emean_com                                      %>% 
+            mutate(case_ens = paste0(case,"_",ens_label))  %>% 
+            filter(case_ens %in% c("0_Site",one_ens))      %>% 
+            mutate(month = month(time))                    %>% 
+            select(-time)
+
+one_mmean = one_emean                                      %>% 
+            group_by(case,ens_label,case_ens,month)        %>% 
+            summarize_all(mean,na.rm=TRUE)                 %>% 
+            ungroup()
+one_mupr  = one_emean                                      %>% 
+            group_by(case,ens_label,case_ens,month)        %>%
+            summarise_all(quantile,probs=qupr_ribbon
+                         ,names=FALSE, na.rm=TRUE)         %>%
+            ungroup()                                      %>%
+            rename_at(vars(var_both)
+                     ,function(x) paste0(x,"_qupr"))
+
+one_mlwr = one_emean                                       %>% 
+            group_by(case,ens_label,case_ens,month)        %>%
+            summarise_all(quantile,probs=qlwr_ribbon
+                         ,names=FALSE, na.rm=TRUE)         %>%
+            ungroup()                                      %>% 
+            rename_at(vars(var_both)
+                     ,function(x) paste0(x,"_qlwr"))
+
+one_mmean = merge(x=one_mmean,y=merge(x=one_mupr,y=one_mlwr,by=c("case","ens_label","case_ens","month"))
+                 ,by=c("case","ens_label","case_ens","month"))
+
+one_colours = c(site_colour,ens_colour[1])
+one_labels  = c("Site","BRDI-NoFire-008-12")
+
+one_loop = which(hlm1dvar$vnam %in% var_both)
+
+gg_one    = list()
+for (h in one_loop){
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   h_vqlwr  = paste0(h_vnam,"_qlwr")
+   h_vqupr  = paste0(h_vnam,"_qupr")
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+
+   mmean_now        = one_mmean
+  mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
+   
+   gg_now = ggplot(data=mmean_now,aes_string(x="month",group="case",colour="case",fill="case"))
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",labels=one_labels,values=one_colours)
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="fill",labels=one_labels,values=one_colours)
+   
+   gg_now = gg_now + geom_ribbon( aes_string(ymin=h_vqlwr,ymax=h_vqupr)
+                                , alpha       = alpha_ribbon
+                                , show.legend = TRUE
+                                , colour      = "transparent"
+                                )
+   gg_now = gg_now + geom_line(aes_string(y=h_vnam)
+                              ,lwd=0.8
+                              ,show.legend=h_legend)
+   
+   gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "right"
+                          , legend.text=element_text(size=gg_ptsz*0.7)
+                          , axis.text.x        = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                          , axis.text.y       = element_text( size   = gg_ptsz*0.9
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                          , axis.ticks.length = unit(-0.25,"cm")
+                          , axis.title.y      = element_text( size = gg_ptsz * 0.9)
+                         ) #end theme
+   gg_one[[h_vnam]] = gg_now   
+}
+     
+    # Wrap plots then global settings and x axis.
+gg_patch = wrap_plots(gg_one)
+gg_patch = gg_patch + guide_area() + plot_layout(guides="collect")
+gg_patch = gg_patch + plot_annotation(tag_levels = "a", title = "")
+ 
+   # Save plots.
+for (d in sequence(ndevice)){
+  
+ h_output = paste0(h_vnam,"_one.",gg_device[d])
+ dummy    = ggsave( filename = h_output
+                  , plot     = gg_patch
+                  , device   = gg_device[d]
+                  , path     = secy_path
+                  , width    = gg_width
+                  , height   = gg_height
+                  , units    = gg_units
+                  , dpi      = gg_depth
+                  )
+
+}
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_patch
+
+
+
+            
+
+```
 
