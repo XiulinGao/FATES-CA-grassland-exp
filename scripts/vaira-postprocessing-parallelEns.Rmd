@@ -45,6 +45,7 @@ home_path = path.expand("~")
 main_path = file.path("~/Google Drive/My Drive/all")
 util_path = file.path(home_path,"Util/RUtils")
 
+
 ens_cases   = c( "avba-fireoff-280.nc"
                , "brdi-fireoff-280.nc"
                , "genl-fireoff-280.nc"
@@ -68,13 +69,16 @@ names(case_desc) = c("1","2","3","4","5","6")
 trait_file  = file.path(main_path,"global-varying-params.csv")
 param_file  = file.path(main_path,"fates_params.nc")
 #obs path
-obs_main   = file.path("~/Google Drive/My Drive/CA-grassland-simulationDoc/benchmark/Vaira-Ranch-AGB-LAI")
-flux_base  = list.files(path=obs_main,pattern="_eddy-summ\\.nc$"  )
-agb_base   = list.files(path=obs_main,pattern="biomass")
-lai_base   = list.files(path=obs_main,pattern="LAI\\.csv$")
-flux_path  = file.path(obs_main,flux_base)
-agb_path   = file.path(obs_main,agb_base)
-lai_path   = file.path(obs_main,lai_base)
+obs_main    = file.path("~/Google Drive/My Drive/CA-grassland-simulationDoc/benchmark")
+site_main   = file.path(obs_main,"Vaira-Ranch-AGB-LAI")
+seablm_main = file.path(obs_main, "Seabloom-CA-grassland-productivity")
+flux_base   = list.files(path=site_main,pattern="_eddy-summ\\.nc$"  )
+agb_base    = list.files(path=site_main,pattern="biomass")
+lai_base    = list.files(path=site_main,pattern="LAI\\.csv$")
+seablm_path = file.path(seablm_main,"nutnet-npp-div-data-output.csv")
+flux_path   = file.path(site_main,flux_base)
+agb_path    = file.path(site_main,agb_base)
+lai_path    = file.path(site_main,lai_base)
 
 ```
 
@@ -928,7 +932,7 @@ age_melt = rbind(age_melt,now_agemelt)
 
 byage = age_melt 
 rm(age_melt)
-gc()
+invisible(gc())
 
 #cat0(" + Turn size-dependent matrices into data tables.")
 #dbh_melt = NULL
@@ -988,7 +992,7 @@ for (c in sequence(ncase)){
 
 bypft = pft_melt
 rm(pft_melt)
-gc()
+invisible(gc())
 
 # Turn drought-deciduous phenology variables into data tables
 if (! is_tibble(dphen)){
@@ -1025,7 +1029,7 @@ if (! is_tibble(dphen)){
    # Replace dphen with the tibble object
    dphen = dph_melt
    rm(dph_melt)
-   gc()
+   invisible(gc())
 }#end if (! is_tibble(dphen))
 
 cat0(" + Turn soil layer-dependent matrices into data tables.")
@@ -1058,7 +1062,7 @@ for (c in sequence(ncase)){
 
 bysoi = soi_melt
 rm(soi_melt)
-gc()
+invisible(gc())
 
 
 cat0(" + Convert classes to integers.")
@@ -1075,7 +1079,8 @@ bysoi$soi = as.integer(bysoi$soi)
 #fwrite(bysoi,file.path(main_path,paste0("allcase_bysoi.csv")))
 #fwrite(hlm1d,file.path(main_path,paste0("allcase_hlm1d.csv")))
 
-
+bypft = fread(file.path(main_path,"allcase_bypft.csv"))
+hlm1d = fread(file.path(main_path,"allcase_hlm1d.csv"))
 
 ```
 
@@ -1277,6 +1282,18 @@ agb = agb                                 %>%
       summarise_all(mean,na.rm=TRUE)      %>% 
       ungroup()
 
+seablm_data = fread(seablm_path)
+sierra_amean = seablm_data                                   %>% 
+              filter(site == "sier.us" & trt == "Control")   %>% 
+              mutate(live = (10^live_lg)*g2kg/2)             %>% 
+              group_by(year)                                 %>% 
+              summarize(agb      = mean(live,na.rm=TRUE)
+                       ,agb_qupr = quantile(live,probs=qupr_ribbon
+                                            ,na.rm=TRUE)
+                       ,agb_qlwr = quantile(live,probs=qlwr_ribbon
+                                            ,na.rm=TRUE))
+              
+
 colnames(agb) <- c("year","month","agb","agb_sd","sample")
 
 site1d  = site1d                              %>% 
@@ -1344,6 +1361,7 @@ names(site_mmean) = site_var
 # if agb during peak growing season (5,6,7)>= 0.1 kgC, we mark the ensemble as survived
 # later we can calculate the (mean - sd) using site obs as threshold
 growing_sea = c("3","4","5")
+
 survi_ens = bypft                                                    %>% 
             mutate(month = month(time))                              %>% 
             group_by(case,ens_label,month)                           %>% 
@@ -1404,7 +1422,7 @@ survi_mmean = survi_ens                                                %>%
            , fates_mortality_ustory       = mean(fates_mortality_ustory)
            , fates_npp                    = mean(fates_npp)
            , fates_vegc_aboveground       = mean(fates_vegc_aboveground)
-           , fates_lai                    = mean(fates_lai))  %>% 
+           , fates_lai                    = mean(fates_lai))          %>% 
   ungroup()
 
 all_mmean = all_ens                                                    %>% 
@@ -1607,15 +1625,15 @@ cue_fun = function(x,n){
    return(cue_mon)
 }
 
-plot_df = survi_ens %>% dplyr::select(fates_gpp,fates_npp,case,ens_label,case_ens,month) %>% 
+cue_mod = survi_ens %>% dplyr::select(fates_gpp,fates_npp,case,ens_label,case_ens,month) %>% 
   mutate(cue = cue_fun(x=.data$fates_npp,n=.data$fates_gpp))
 
-plot_df = plot_df %>% group_by(case,ens_label,case_ens,month) %>% 
+cue_mod = cue_mod %>% group_by(case,ens_label,case_ens,month) %>% 
           summarise_all(mean) %>% ungroup()
 cue_obs = cue_obs                    %>% 
           filter(month %in% c(3,4,5))
 cat0("+ Plot carbon use efficiency")
-ggplot(plot_df, aes(fates_gpp,fates_npp)) +
+ggplot(cue_mod, aes(fates_gpp,fates_npp)) +
   geom_point(aes(colour="Model")) +
   facet_wrap(.~case,labeller=labeller(case=case_desc)) +
   labs(x=expression("GPP ("~gC~m^-2~day^-1~")"),
@@ -1642,6 +1660,8 @@ ggplot(plot_df, aes(fates_gpp,fates_npp)) +
 ggsave(filename="cue.png",path=plot_main,width=gg_width*1.5,height=gg_width,unit="cm",dpi=gg_depth)
 
 ```
+
+
 
 
 
@@ -1896,102 +1916,6 @@ for(c in sequence(ncase)){
 
 
 
-```{r,"trait-model-ouputs-correlations",message=FALSE,fig.height=12, fig.width=14}
-
-## only for survived ens
-survi_peak = survi_mmean                    %>% 
-             filter(month==4)               
-  
-survi_all  = survi_peak                                                 %>% 
-             left_join(param_survi,by=c("case_ens","case","ens_label"))
-             
-               
-cor_survi   = survi_all[c(1,8,12:16, 18:21,23:40)] 
-
-cor_allens   = all_mmean                                               %>% 
-               filter(month==4)                                        %>% 
-               left_join(param_all,by=c("case_ens","case","ens_label"))  
-cor_allens  = cor_allens[c(1,8,12:16, 18:21,23:40)]
-               
-
-nam = names(cor_survi)
-nam = gsub("fates_",replacement="",x=nam)
-colnames(cor_survi)  = nam
-colnames(cor_allens) = nam
-
-for(c in sequence(ncase)){
-  case_now  = case_names[c]
-  desc_now  = case_desc[c]
-  survi_now = cor_survi                 %>% 
-              filter(case == case_now)  %>% 
-              dplyr::select(-case)
-  all_now   = cor_allens                %>% 
-              filter(case == case_now)  %>% 
-              dplyr::select(-case)
-  
-  # pairs(survi_now) +
-  # theme_grey( base_size = 40, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5) +
-  # title(paste0(case_now,"_Survied")) +
-  # theme(legend.text=element_text(size=gg_ptszl)
-  #    ,axis.text.x = element_text( size   = gg_ptszl
-  #                                , margin = unit(rep(0.35,times=4),"cm"))#end element_text
-  #                               , axis.text.y= element_text( size   = gg_ptszl
-  #                                              , margin = unit(rep(0.35,times=4),"cm")
-  #                                              )#end element_text
-  #                                , axis.ticks.length = unit(-0.25,"cm")
-  #                                )
-
-  corr_surviens     = cor(survi_now)
-  corr_allens       = cor(all_now)
-  f_output = paste0(desc_now,"_correlation-all.png")
-  png(file=file.path(plot_main,f_output),
-  width=13,height=8,units="in",res=600)
-
-  corrplot(corr_allens
-          ,method = "color"
-          ,type="upper"
-          ,addCoef.col="grey50"
-          ,title = paste(desc_now,"all ensembles",sep=" ")
-          ,mar=c(0,0,1,0)
-          #,addCoefasPercent=TRUE
-          #,cl.pos="n"
-          ,order = "original"
-         #,diag=FALSE
-         ,number.cex=0.55
-         ,tl.cex = 1
-         ,tl.col="black"
-         ,cl.cex=1)
-  dev.off()
-
-  f_output=paste0(desc_now,"_correlation-survi.png")
-  png(file=file.path(plot_main,f_output),
-     width=13,height=8,units="in",res=600)
-
-  corrplot(corr_surviens
-          ,method = "color"
-          ,type="upper"
-          ,addCoef.col="grey50"
-          ,title = paste(desc_now,"survived ensembles",sep=" ")
-          ,mar=c(0,0,1,0)
-          ,order = "original"
-          #,diag  = FALSE
-          ,number.cex=0.55
-          ,tl.cex = 1
-          ,tl.col="black"
-          ,cl.cex=1)
-dev.off()
-  
-}
-
-
-```
-
-
-
-
-
-
-
 
 
 
@@ -2199,29 +2123,292 @@ if (plot_mort_dbh){
 
 
 
-```{r,label="variance-decomp-main",message=FALSE}
 
-## we use the max monthly mean value of each assessed model outputs for doing parameter analysis for survived ensembles
+```{r,label="data-for-variance-decomp-and-correlation-matrix"}
+
+## we use different ways to summarize model outputs to do variance decomposition
+
+#1. the max monthly mean value 
 asses_vars   = names(survi_mmean)[c(8,12:16,18:19)]
-n_var        = length(asses_vars)
-sens_survi   = survi_mmean                                                  %>% 
+
+max_survi   = survi_mmean                                                   %>% 
                dplyr::select(all_of(c("case","ens_label",asses_vars)))      %>% 
                group_by(case,ens_label)                                     %>% 
                summarize_all(max,na.rm=TRUE)                                %>% 
                ungroup()
 
-sens_all     = all_mmean                                                    %>% 
+max_all     = all_mmean                                                     %>% 
                dplyr::select(all_of(c("case","ens_label",asses_vars)))      %>% 
                group_by(case,ens_label)                                     %>% 
                summarize_all(max,na.rm=TRUE)                                %>% 
                ungroup()
+
+mmean_lh      = hlm1d                                                       %>% 
+              dplyr::select(case,ens_label,time,eflx_lh_tot)                %>% 
+              mutate(month=month(time))                                     %>% 
+              select(-time)                                                 %>% 
+              group_by(case,ens_label,month)                                %>% 
+              summarize_all(mean,na.rm=TRUE)                                %>% 
+              ungroup()                                                     %>% 
+              mutate(case_ens = paste0(case,"_",ens_label))
+
+max_lhall    = mmean_lh                                                     %>% 
+               group_by(case,ens_label)                                     %>% 
+               select(-c(month,case_ens))                                   %>% 
+               summarize_all(max,na.rm=TRUE)                                %>% 
+               ungroup()
+max_lhsur    = mmean_lh                                                     %>% 
+               filter(case_ens %in% survi_label)                            %>% 
+               group_by(case,ens_label)                                     %>% 
+               select(-c(month,case_ens))                                   %>% 
+               summarize_all(max,na.rm=TRUE)                                %>% 
+               ungroup()
+ 
+maxsur_sens     = max_survi                                     %>% 
+                  left_join(max_lhsur,by=c("case","ens_label"))
+maxall_sens     = max_all                                       %>% 
+                  left_join(max_lhall,by=c("case","ens_label"))
+
+#2. group data into 3 different seasons: growing season (1,2,3,4),senescence season(5,6,7,8),
+#  and dormant season(9,10,11,12) and calculate the mean value of each season, do decomposition for each season
+
+gs_month = c("1","2","3","4")
+ss_month = c("5","6","7","8")
+ds_month = c("9","10","11","12")
+gs_sur   =    survi_mmean                                                   %>% 
+              filter(month %in% gs_month)                                   %>% 
+              dplyr::select(all_of(c("case","ens_label",asses_vars)))       %>% 
+              group_by(case,ens_label)                                      %>% 
+              summarize_all(mean,na.rm=TRUE)                                %>% 
+              ungroup()
+
+gs_all     = all_mmean                                                      %>% 
+             filter(month %in% gs_month)                                    %>%
+             dplyr::select(all_of(c("case","ens_label",asses_vars)))        %>% 
+             group_by(case,ens_label)                                       %>% 
+             summarize_all(mean,na.rm=TRUE)                                 %>% 
+             ungroup()
+
+gs_lhall    = mmean_lh                                                      %>% 
+              filter(month %in% gs_month)                                   %>% 
+              group_by(case,ens_label)                                      %>% 
+              select(-c(month,case_ens))                                    %>% 
+              summarize_all(mean,na.rm=TRUE)                                %>% 
+              ungroup()
+gs_lhsur    = mmean_lh                                                      %>% 
+               filter(case_ens %in% survi_label & month %in% gs_month)      %>% 
+               group_by(case,ens_label)                                     %>% 
+               select(-c(month,case_ens))                                   %>% 
+               summarize_all(mean,na.rm=TRUE)                               %>% 
+               ungroup()
+gsall_sens  = gs_all                                        %>% 
+              left_join(gs_lhall, by=c("case","ens_label"))
+gssur_sens  = gs_sur                                        %>% 
+              left_join(gs_lhsur, by=c("case","ens_label"))
+
+ss_sur   =    survi_mmean                                                   %>% 
+              filter(month %in% ss_month)                                   %>% 
+              dplyr::select(all_of(c("case","ens_label",asses_vars)))       %>% 
+              group_by(case,ens_label)                                      %>% 
+              summarize_all(mean,na.rm=TRUE)                                %>% 
+              ungroup()
+
+ss_all     = all_mmean                                                      %>% 
+             filter(month %in% ss_month)                                    %>%
+             dplyr::select(all_of(c("case","ens_label",asses_vars)))        %>% 
+             group_by(case,ens_label)                                       %>% 
+             summarize_all(mean,na.rm=TRUE)                                 %>% 
+             ungroup()
+
+ss_lhall    = mmean_lh                                                      %>% 
+              filter(month %in% ss_month)                                   %>% 
+              group_by(case,ens_label)                                      %>% 
+              select(-c(month,case_ens))                                    %>% 
+              summarize_all(mean,na.rm=TRUE)                                %>% 
+              ungroup()
+ss_lhsur    = mmean_lh                                                      %>% 
+               filter(case_ens %in% survi_label & month %in% ss_month)      %>% 
+               group_by(case,ens_label)                                     %>% 
+               select(-c(month,case_ens))                                   %>% 
+               summarize_all(mean,na.rm=TRUE)                               %>% 
+               ungroup()
+ssall_sens  = ss_all                                        %>% 
+              left_join(ss_lhall, by=c("case","ens_label"))
+sssur_sens  = ss_sur                                        %>% 
+              left_join(ss_lhsur, by=c("case","ens_label"))
+
+ds_sur   =    survi_mmean                                                   %>% 
+              filter(month %in% ds_month)                                   %>% 
+              dplyr::select(all_of(c("case","ens_label",asses_vars)))       %>% 
+              group_by(case,ens_label)                                      %>% 
+              summarize_all(mean,na.rm=TRUE)                                %>% 
+              ungroup()
+
+ds_all     = all_mmean                                                      %>% 
+             filter(month %in% ds_month)                                    %>%
+             dplyr::select(all_of(c("case","ens_label",asses_vars)))        %>% 
+             group_by(case,ens_label)                                       %>% 
+             summarize_all(mean,na.rm=TRUE)                                 %>% 
+             ungroup()
+
+ds_lhall    = mmean_lh                                                      %>% 
+              filter(month %in% ds_month)                                   %>% 
+              group_by(case,ens_label)                                      %>% 
+              select(-c(month,case_ens))                                    %>% 
+              summarize_all(mean,na.rm=TRUE)                                %>% 
+              ungroup()
+ds_lhsur    = mmean_lh                                                      %>% 
+               filter(case_ens %in% survi_label & month %in% ds_month)      %>% 
+               group_by(case,ens_label)                                     %>% 
+               select(-c(month,case_ens))                                   %>% 
+               summarize_all(mean,na.rm=TRUE)                               %>% 
+               ungroup()
+dsall_sens  = ds_all                                        %>% 
+              left_join(ds_lhall, by=c("case","ens_label"))
+dssur_sens  = ds_sur                                        %>% 
+              left_join(ds_lhsur, by=c("case","ens_label"))
+
+asses_vars = c(asses_vars,"eflx_lh_tot")
+n_var        = length(asses_vars)
 
 pars         = names(param_survi)[c(1:2,4:21)] #slamax and slatop are same, so we chose only one
 n_param      = length(pars)
-sens_survi   = sens_survi                                        %>% 
+
+
+maxsur_sens  = maxsur_sens                                        %>% 
                left_join(param_survi,by=c("case","ens_label"))
-sens_all     = sens_all                                          %>% 
+maxall_sens  = maxall_sens                                        %>% 
                left_join(param_all,by=c("case","ens_label"))
+gssur_sens   = gssur_sens                                        %>% 
+               left_join(param_survi,by=c("case","ens_label"))
+gsall_sens   = gsall_sens                                        %>% 
+               left_join(param_all,by=c("case","ens_label"))
+sssur_sens   = sssur_sens                                        %>% 
+               left_join(param_survi,by=c("case","ens_label"))
+ssall_sens   = ssall_sens                                        %>% 
+               left_join(param_all,by=c("case","ens_label"))
+dssur_sens   = dssur_sens                                        %>% 
+               left_join(param_survi,by=c("case","ens_label"))
+dsall_sens   = dsall_sens                                        %>% 
+               left_join(param_all,by=c("case","ens_label"))
+
+```
+
+
+
+
+
+
+```{r,"trait-model-ouputs-correlations",message=FALSE,fig.height=12, fig.width=14}
+
+
+cor_survi   = gssur_sens
+cor_allens  = gsall_sens
+type        = "growing"
+cor_survi   = cor_survi[c(1,3:13,15:32)] 
+cor_allens  = cor_allens[c(1,3:13,15:32)]
+               
+
+
+for(c in sequence(ncase)){
+  case_now  = case_names[c]
+  desc_now  = case_desc[c]
+  survi_now = cor_survi                 %>% 
+              filter(case == case_now)  %>% 
+              dplyr::select(-case)
+  all_now   = cor_allens                %>% 
+              filter(case == case_now)  %>% 
+              dplyr::select(-case)
+  
+  # pairs(survi_now) +
+  # theme_grey( base_size = 40, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5) +
+  # title(paste0(case_now,"_Survied")) +
+  # theme(legend.text=element_text(size=gg_ptszl)
+  #    ,axis.text.x = element_text( size   = gg_ptszl
+  #                                , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+  #                               , axis.text.y= element_text( size   = gg_ptszl
+  #                                              , margin = unit(rep(0.35,times=4),"cm")
+  #                                              )#end element_text
+  #                                , axis.ticks.length = unit(-0.25,"cm")
+  #                                )
+
+  corr_surviens     = cor(survi_now)
+  p_sur             = cor.mtest(survi_now,conf.level=0.95, method="pearson")$p
+  corr_allens       = cor(all_now)
+  p_all             = cor.mtest(all_now,conf.level=0.95, method="pearson")$p
+  
+  cor_nams          = c("GPP","$ Mort[Cstar]","$ Mort[Hydro]","$ Mort[Term]",
+                        "$ Mort[Can]","$ Mort[Und]","AGB","LAI",":lambda*E",
+                        "$ Leaf[Dia]","$ Leaf[Tunovr]","SLA","vcmax","$ BB[incpt]",
+                        "$ BB[slope]","LNC","$ Recruit[DBH]", "$ Recruit[Alloc]",
+                        "$ Recruit[hgt]", "$ C[Storage]","$ SWC[Phen]","smpsc",
+                        "smpso","$ Root[a]","$ Root[b]","$ Mort[hyd-scala]",
+                        "$ Mort[cst-scala]","$ Decomp[max]","$ Respir[grow]")
+  colnames(corr_surviens) = cor_nams
+  rownames(corr_surviens) = cor_nams
+  colnames(corr_allens) = cor_nams
+  rownames(corr_allens) = cor_nams
+  colnames(p_sur) = cor_nams
+  rownames(p_sur) = cor_nams
+  colnames(p_all) = cor_nams
+  rownames(p_all) = cor_nams
+  
+  f_output = paste0(desc_now,"_",type,"_correlation-all.png")
+  png(file=file.path(plot_main,f_output),
+  width=13,height=8,units="in",res=600)
+
+  corrplot(corr_allens
+          ,method      = "ellipse"
+          ,type        = "lower"
+          ,p.mat       = p_all
+          ,sig.level   = 0.05
+          ,insig       = "blank"
+          ,addCoef.col = "grey50"
+          ,title = paste(desc_now,type,"all ensembles",sep=" ")
+          ,mar=c(0,0,1,0)
+          #,addCoefasPercent=TRUE
+          #,cl.pos="n"
+          ,order = "original"
+         #,diag=FALSE
+          ,number.cex=0.55
+          ,tl.cex = 1
+          ,tl.col="black"
+          ,cl.cex=1)
+  dev.off()
+
+  f_output=paste0(desc_now,"_",type,"_correlation-survi.png")
+  png(file=file.path(plot_main,f_output),
+     width=13,height=8,units="in",res=600)
+
+  corrplot(corr_surviens
+          ,method      = "ellipse"
+          ,type        = "lower"
+          ,p.mat       = p_sur
+          ,sig.level   = 0.05
+          ,insig       = "blank"
+          ,addCoef.col = "grey50"
+          ,title       = paste(desc_now,type,"survived ensembles",sep=" ")
+          ,mar         = c(0,0,1,0)
+          ,order       = "original"
+          #,diag  = FALSE
+          ,number.cex  = 0.55
+          ,tl.cex      = 1
+          ,tl.col      ="black"
+          ,cl.cex      = 1)
+dev.off()
+  
+}
+
+
+```
+
+
+
+
+
+
+
+```{r,label="variance-decomp-main",message=FALSE}
 
 sens_main = matrix( data=NA_real_
                   , nrow=n_var*ncase
@@ -2230,8 +2417,8 @@ sens_main = matrix( data=NA_real_
 
 
 sens_plot = list()
-sens_df   = sens_all #to select doing variance decompose for all or survived ensembles
-type      = "all"
+sens_df   = sssur_sens #to select doing variance decompose for all or survived ensembles
+type      = "senescence"
 for(c in sequence(ncase)){
   case_now  = case_names[c]
   desc_now  = case_desc[c]
@@ -2294,6 +2481,13 @@ for(c in sequence(ncase)){
 
 
 ```
+
+
+
+
+
+
+
 
 
 
@@ -2418,24 +2612,48 @@ sens_decom           = rbind(sens_madf,sens_midf)
 sens_decom           = sens_decom                                           %>%  
                        pivot_longer(cols = turb_diameter:grperc
                                    ,names_to  = "parameter"
-                                   ,values_to = "var_decomp")               
+                                   ,values_to = "var_decomp")   
+par_label            = cor_nams[10:29]
+par_label            = gsub(pattern="\\$ ", replacement="",x=par_label)
+
 sens_decom           = sens_decom                                                %>% 
-                       mutate( var_decomp = round(as.numeric(var_decomp)*100,1)) 
+                       mutate( var_decomp = round(as.numeric(var_decomp)*100,1)
+                             , label      = rep(par_label,time=n_var*ncase*2)) 
   
+var_label            = c("Growth primary productivity"
+                        ,"Leaf area index"
+                        ,"Latent heat flux"
+                        ,"Canopy mortality"
+                        ,"Carbon starvation mortality"
+                        ,"Hydraulic mortality"
+                        ,"Termination mortality"
+                        ,"Understory mortality"
+                        , "Aboveground biomass")
+names(var_label)     = c("fates_gpp"
+                        ,"fates_lai"
+                        ,"eflx_lh_tot"
+                        ,"fates_mortality_canopy"
+                        ,"fates_mortality_cstarv"
+                        ,"fates_mortality_hydraulic"
+                        ,"fates_mortality_termination"
+                        ,"fates_mortality_ustory"
+                        ,"fates_vegc_aboveground")
+
 
 decomp_plot=list()
 for(c in sequence(ncase)){
   desc_now   = case_desc[c]
   decomp_now = sens_decom %>% filter(case==desc_now)
   
-  gg_now = ggplot(decomp_now,aes(var_decomp,parameter)) 
-  gg_now = gg_now + geom_point(aes(x=var_decomp,y=parameter,colour=type,group=type),size=2.5)
+  gg_now = ggplot(decomp_now,aes(var_decomp,label)) 
   gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp,colour=type)
-                                  ,size=3, alpha=0.4)#,position = position_dodge(width = 0.2))
-  gg_now = gg_now + facet_wrap(.~ model_var)
+                                  ,size=4, alpha=0.7)#,position = position_dodge(width = 0.2))
+  gg_now = gg_now + scale_colour_manual(values = ens_colour[c(1,3)])
+  gg_now = gg_now + facet_wrap(.~ model_var,labeller=labeller(model_var=var_label))
   gg_now = gg_now + labs(title = paste(desc_now,type,sep="-"))
   gg_now = gg_now + xlab("Variance explained (%)")
   gg_now = gg_now + ylab(element_blank())
+  gg_now = gg_now + scale_y_discrete(labels = scales::label_parse())
   gg_now = gg_now + theme_grey( base_size = gg_ptsz
                               , base_family = "Helvetica"
                               , base_line_size = 0.5
@@ -2447,7 +2665,7 @@ for(c in sequence(ncase)){
                                                       , margin = unit(rep(0.35,times=4),"cm")
                                                       )#end element_text
                           , axis.ticks.length = unit(-0.25,"cm")
-                          , legend.position   = c(0.85,0.2)
+                          , legend.position   = "bottom"
                           , legend.direction  = "horizontal"
                           )#end theme
   for (d in sequence(ndevice)){
@@ -2457,7 +2675,7 @@ for(c in sequence(ncase)){
                      , device   = gg_device[d]
                      , path     = plot_main
                      , width    = gg_widthn
-                     , height   = gg_height*1.4
+                     , height   = gg_height*1.5
                      , units    = gg_units
                      , dpi      = gg_depth
                      )
@@ -2473,18 +2691,134 @@ if(gg_screen) decomp_plot
 
 
 
+```{r,label="visualize-parameter-effects"}
+lhsur_mmean  = hlm1d                                         %>% 
+               dplyr::select(case,ens_label,time,eflx_lh_tot)%>% 
+               mutate(month    = month(time)
+                     ,case_ens = paste0(case,"_",ens_label)) %>%
+               filter(case_ens %in% survi_label)             %>% 
+               dplyr::select(-c(time,case_ens))              %>% 
+               group_by(case,ens_label,month)                %>% 
+               summarize_all(mean,na.rm=TRUE)                %>% 
+               ungroup()
+plot_pareff = survi_mmean                                    %>% 
+              left_join(lhsur_mmean
+                       ,by=c("case","ens_label","month"))                    %>% 
+              group_by(case,ens_label)                                       %>% 
+              mutate(lh_peakT  = month[which.max(eflx_lh_tot)]
+                    ,lh_peak   = max(eflx_lh_tot)     
+                    ,lai_peakT = month[which.max(fates_lai)]
+                    ,lai_peak  = max(fates_lai)
+                    ,gpp_peakT = month[which.max(fates_gpp)]
+                    ,gpp_peak  = max(fates_gpp)
+                    ,agb_peakT = month[which.max(fates_vegc_aboveground)]
+                    ,agb_peak  = max(fates_vegc_aboveground))                %>% 
+             ungroup()
+
+
+plot_pareff = plot_pareff                                           %>% 
+              group_by(case,ens_label)                              %>% 
+              mutate(lai_grp = cut(lai_peak
+                                  ,breaks = c(-Inf,1.5,2.5,Inf)
+                                  ,labels = c("LAI[0-1.5~m^2~m^{-2}]"
+                                             ,"LAI[1.5-2.5~m^2~m^{-2}]"
+                                             ,"LAI[2.5-Inf~m^2~m^{-2}]"))
+                    ,gpp_grp = cut(gpp_peak
+                                  ,breaks = c(-Inf,5,7.5,Inf)
+                                  ,labels = c("GPP[0-5~gC~m^{-2}~Day^{-1}]"
+                                             ,"GPP[5-7.5~gC~m^{-2}~Day^{-1}]"
+                                             ,"GPP[7.5-Inf~gC~m^{-2}~Day^{-1}]"))
+                    ,lh_grp  = cut(lh_peak
+                                  ,breaks = c(-Inf,60,75,Inf)
+                                  ,labels = c("lambda*E[0-60~W~m^{-2}]"
+                                             ,"lambda*E[60-75~W~m^{-2}]"
+                                             ,"lambda*E[75-Inf~W~m^{-2}]"))
+                    ,agb_grp = cut(agb_peak
+                                  ,breaks = c(-Inf,0.15,0.25,Inf)
+                                  ,labels = c("AGB[0-0.15~kgC~m^{-2}]"
+                                             ,"AGB[0.15-0.25~kgC~m^{-2}]"
+                                             ,"AGB[0.25-Inf~kgC~m^{-2}]")))    %>% 
+              ungroup()
+              
+              
+ only_lh = plot_pareff                                                %>% 
+               dplyr::select(case,ens_label,lh_peak,lh_peakT,lh_grp)  %>% 
+               left_join(param_survi,by=c("case","ens_label"))        %>% 
+               distinct()
+ only_lh = only_lh                                                    %>% 
+           mutate(lh_peakT = factor(lh_peakT
+                                  ,labels=c("March","April","May")))
+
+gg_now = ggplot(only_lh,aes(phen_drought_threshold,recruit_height_min,colour=lh_grp)) 
+gg_now = gg_now +  geom_point(aes(shape=lh_peakT)) 
+gg_now = gg_now +  facet_wrap(.~case,labeller=labeller(case=case_desc)) 
+#gg_now = gg_now +  geom_boxplot()
+gg_now = gg_now +  scale_colour_manual(labels = parse_format()
+                                      ,values=ens_colour[c(1:3)]
+                                      ,name="Peak value")
+gg_now = gg_now +  scale_shape_manual(values=c(13,16:17),name="Peak month")
+gg_now = gg_now +  labs(x=expression(Soil~water~content[Drought-Decid])
+                       ,y=expression(Recruitment[Height-min]~"(m)"))
+gg_now = gg_now + theme_grey( base_size = gg_ptsz
+                              , base_family = "Helvetica"
+                              , base_line_size = 0.5
+                              , base_rect_size = 0.5)
+gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.text.y = element_text( size   = gg_ptsz-5
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.ticks.length = unit(-0.25,"cm")
+                          , legend.position   = "bottom"
+                          , legend.direction  = "horizontal"
+                          )#end theme
+p_output = paste0("LH-param-effects.",gg_device)
+dummy    = ggsave( filename = p_output
+                    , plot     = gg_now
+                    , device   = gg_device[d]
+                    , path     = plot_main
+                    , width    = gg_width*0.65
+                    , height   = gg_height
+                    , units    = gg_units
+                    , dpi      = gg_depth
+                    )
+
+if(gg_screen) gg_now
+
+```
+
+
+
+
+
 ```{r,label="ensemble-filtering",message=FALSE,results='hide'}
 rm(mmean_now,mmean_plot)
+
+lw.dec  = 0.8
+hi.add  = 1.2
 
 
 ens_filt    = mmean_com       %>% 
               filter(case!=0) %>% 
               rename_at(vars(names(mmean_com)[-c(1:3)])
                        ,function(x) paste0(x,"_mod"))
+
 ens_filt    = ens_filt                        %>% 
               left_join(site_mmean
                        ,by=c("month"))        %>%       
-              filter(month %in% growing_sea)  
+              filter(month %in% growing_sea) 
+
+ens_filt    = ens_filt                        %>% 
+              left_join(site_mmean
+                       ,by=c("month"))
+
+#ens_filt    = ens_filt                                                                              %>% 
+#              mutate(eflx_lh_tot_qlwr = if_else(month==3,eflx_lh_tot_qlwr *lw.dec,eflx_lh_tot_qlwr)
+#                    ,eflx_lh_tot_qupr = if_else(month==3,eflx_lh_tot_qupr*hi.add,eflx_lh_tot_qupr)
+#                    ,fates_gpp_qlwr   = if_else(month==3,fates_gpp_qlwr*lw.dec,fates_gpp_qlwr)
+#                    ,fates_gpp_qupr   = if_else(month==3,fates_gpp_qupr*hi.add,fates_gpp_qupr)
+#                    )
 
 ens_filt    = ens_filt                                   %>% 
               mutate(month_keep = if_else(
@@ -2499,7 +2833,8 @@ ens_filt    = ens_filt                                   %>%
               ungroup()
 
 ens_filt    = ens_filt                        %>% 
-              mutate(month_keep = if_else(
+              #filter(!month== 3)                         %>% #Both LH and GPP have narrow range in March
+              mutate(month_keep = if_else(                   #we exclude this month to be more relaxing
                      fates_gpp_mod >= fates_gpp_qlwr & fates_gpp_mod <= fates_gpp_qupr
                     ,"keep"
                     ,"drop")) 
@@ -2525,12 +2860,11 @@ ens_filt    = ens_filt                                   %>%
               ungroup()
 
 ens_filt    = ens_filt                                   %>% 
-              mutate(month_keep = if_else(
+              mutate(month_keep = if_else(                   
                     eflx_lh_tot_mod >= eflx_lh_tot_qlwr & 
                     eflx_lh_tot_mod <= eflx_lh_tot_qupr
                    ,"keep"
                    ,"drop"))
-
 
 ens_filt    = ens_filt                                   %>% 
               group_by(case,ens_label)                   %>% 
@@ -2540,7 +2874,9 @@ ens_filt    = ens_filt                                   %>%
               ungroup()                                  %>% 
               mutate(case_ens = paste0(case,"_",ens_label))
 
-ens_keep  = unique(ens_filt$case_ens)  #only 8 members made it to the next round
+ens_keep  = unique(ens_filt$case_ens)  
+
+
 
 
 ```
@@ -2550,7 +2886,7 @@ ens_keep  = unique(ens_filt$case_ens)  #only 8 members made it to the next round
 
 
 
-```{r,label="kept-members-seasonal-dynamic",message=FALSE}
+```{r,label="kept-members-seasonal-dynamic",message=FALSE,results='hide'}
 
 keep_mmean = mmean_com                                        %>% 
              mutate(case_ens = paste0(case,"_",ens_label))    %>% 
@@ -2582,12 +2918,13 @@ for (h in keep_loop){
    
    gg_now = ggplot(data=mmean_now)
    gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,group="case_ens",colour="case")
-                              ,lwd=0.8,alpha=0.8,show.legend=TRUE)
+                              ,lwd=0.5,alpha=0.8,show.legend=TRUE)
    gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",values=keep_colours,labels=keep_labels)
    gg_now = gg_now + geom_ribbon( data = obs
                                 , aes_string(x = "month",ymin=h_vqlwr,ymax=h_vqupr)
                                 , alpha       = alpha_ribbon
                                 , inherit.aes = FALSE
+                                , show.legend = h_legend
                                 , colour      = "transparent"
                                 )
    gg_now = gg_now + labs(title=h_desc)
@@ -2595,37 +2932,41 @@ for (h in keep_loop){
    gg_now = gg_now + xlab(element_blank())
    gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
-   gg_now = gg_now + theme( legend.position   = "right"
-                         , legend.text=element_text(size=gg_ptsz)
-                         , axis.text.x        = element_text( size   = gg_ptsz
+   gg_now = gg_now + theme(axis.text.x        = element_text( size   = gg_ptsz
                                                            , margin = unit(rep(0.35,times=4),"cm"))#end element_text
                          , axis.text.y       = element_text( size   = gg_ptsz
                                                            , margin = unit(rep(0.35,times=4),"cm")
                                                            )#end element_text
                          , axis.ticks.length = unit(-0.25,"cm")
+                         , axis.title.y = element_text(size = gg_ptsz*0.9)
+                         , legend.text=element_text(size=gg_ptsz*0.7)
+                         , plot.title = element_text(size = gg_ptsz*0.95)
                          ) #end theme
+   gg_keep[[h_vnam]] = gg_now   
   
- 
-   # Save plots.
-   for (d in sequence(ndevice)){
-    h_output = paste0(h_vnam,"_keep.",gg_device[d])
+   }
+  
+  gg_patch = wrap_plots(gg_keep)
+  gg_patch = gg_patch + guide_area() + plot_layout(guides="collect")
+  gg_patch = gg_patch + plot_annotation(tag_levels = "a", title = "")
+  
+ # Save plots.
+for (d in sequence(ndevice)){
+    h_output = paste0("kept-ens-obs1.2-compare.",gg_device[d])
     dummy    = ggsave( filename = h_output
-                    , plot     = gg_now
+                    , plot     = gg_patch
                     , device   = gg_device[d]
                     , path     = secy_path
-                    , width    = gg_widthn*0.7
+                    , width    = gg_width
                     , height   = gg_height
                     , units    = gg_units
                     , dpi      = gg_depth
                     )
-   }
-  gg_keep[[h_vnam]] = gg_now      
-
 }
 
 
 # If sought, plot images on screen
-if (gg_screen) gg_keep
+if (gg_screen) gg_patch
 
 
 
@@ -2637,7 +2978,74 @@ if (gg_screen) gg_keep
 
 
 
-```{r,"agb-range-model-ob-compare"}
+
+```{r,label="double-check-agb-seabloom-data"}
+
+## AGB from Vaira Ranch likely includes both live and dead mass, we double check with
+## Seabloom et al. 2020 data https://portal.edirepository.org/nis/mapbrowse?packageid=edi.599.2
+## at Sierra foothill site
+seablm_fates = survi_amean                                   %>% 
+               dplyr::select(case,ens_label,case_ens
+                            ,year,fates_vegc_aboveground)    %>% 
+               rename(agb = fates_vegc_aboveground) 
+keep_fates   = survi_amean                                   %>% 
+               dplyr::select(case,ens_label,case_ens
+                            ,year,fates_vegc_aboveground)    %>% 
+               filter(case_ens %in% ens_keep)                %>% 
+               rename(agb = fates_vegc_aboveground) 
+#amean_now = seablm_fates
+amean_now  = keep_fates
+amean_now$case = factor(amean_now$case,levels=unique(amean_now$case))
+   
+gg_now = ggplot(data=amean_now)
+gg_now = gg_now + geom_line(aes(x=year,y=agb,group=ens_label,color="Model")
+                              ,lwd=1,alpha=0.8,show.legend=TRUE)
+gg_now = gg_now + geom_line(data = sierra_amean,aes(x=year,y=agb,color="Seabloom-SierraFoothill"))
+gg_now = gg_now + scale_colour_manual(name="",values=c("Model"=ens_colour[1]
+                                                ,"Seabloom-SierraFoothill"=site_colour))
+gg_now = gg_now + geom_ribbon( data = sierra_amean
+                                , aes(x = year,ymin=agb_qlwr,ymax=agb_qupr)
+                                , alpha       = alpha_ribbon
+                                , inherit.aes = FALSE
+                                , show.legend = h_legend
+                                , colour      = "transparent"
+                                )
+gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))    
+
+gg_now = gg_now + xlab("Year")
+gg_now = gg_now + ylab(expression(Aboveground~biomass~"("~kgC~m^{-2}~")"))
+gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+gg_now = gg_now + theme(axis.text.x        = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         , axis.title.y = element_text(size = gg_ptsz*0.9)
+                         , legend.text=element_text(size=gg_ptsz*0.7)
+                         , plot.title = element_text(size = gg_ptsz*0.95)
+                         ) #end theme
+p_output = paste0("seablm-keep-agb.",gg_device)
+dummy    = ggsave( filename = p_output
+                 , plot     = gg_now
+                 , device   = gg_device[d]
+                 , path     = plot_main
+                 , width    = gg_width
+                 , height   = gg_height*0.7
+                 , units    = gg_units
+                 , dpi      = gg_depth
+                    )
+
+if(gg_screen) gg_now
+
+```
+
+
+
+
+
+
+```{r,"agb-range-model-ob-compare",results='hide'}
 
 one_ens = "5_node_008-task_012"
 one_emean = emean_com                                      %>% 
@@ -2686,7 +3094,7 @@ for (h in one_loop){
    cat0("   - ",h_desc,".")
 
    mmean_now        = one_mmean
-  mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
+   mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
    
    gg_now = ggplot(data=mmean_now,aes_string(x="month",group="case",colour="case",fill="case"))
    gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",labels=one_labels,values=one_colours)
@@ -2707,7 +3115,7 @@ for (h in one_loop){
    gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
    gg_now = gg_now + theme( legend.position   = "right"
-                          , legend.text=element_text(size=gg_ptsz*0.7)
+                          , legend.text=element_text(size=gg_ptsz*0.9)
                           , axis.text.x        = element_text( size   = gg_ptsz
                                                            , margin = unit(rep(0.35,times=4),"cm"))#end element_text
                           , axis.text.y       = element_text( size   = gg_ptsz*0.9
