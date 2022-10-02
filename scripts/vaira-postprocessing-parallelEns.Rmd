@@ -1712,7 +1712,7 @@ cat0(" + Plot monthly mean of variables.")
 
 #leg_colours = c(site_colour,ens_colour)
 #leg_labels  = c("Site",case_desc)
-mmean_plot  = mmean_com 
+
 emean_loop = which(hlm1dvar$vnam %in% hlm_var)
 
 gg_emean   = list()
@@ -1726,7 +1726,7 @@ for (h in emean_loop){
    h_legend = v == 1
    cat0("   - ",h_desc,".")
 
-   mmean_now        = mmean_plot
+   mmean_now        = mmean_com
    mmean_now        = subset(mmean_now,case!=0)
    obs              = site_mmean 
    #mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
@@ -1788,6 +1788,55 @@ if (gg_screen) gg_emean
 
 
 
+
+
+
+
+```{r,label="plot-difference-between-co2-treatments"}
+
+survi_co2 = as_tibble(survi_label)
+survi_co2 = survi_co2                         %>% 
+            mutate(case = substr(value,1,1)
+                  ,ens  = substr(value,3,20)) %>% 
+            filter(case %in% c("4","5","6"))  %>% 
+            mutate(cores_case = case_when(case == "4" ~ "1"
+                                         ,case == "5" ~ "2"
+                                         ,case == "6" ~ "3")
+                  ,cores_survi= paste0(cores_case,"_",ens))
+
+survi_280 = survi_co2$cores_survi
+survi_400 = survi_co2$value
+
+
+delta_co2 = hlm1d                                          %>% 
+            mutate(case_ens = paste0(case,"_",ens_label))  %>% 
+            filter(case_ens %in% c(survi_280,survi_400))   %>% 
+            dplyr::select(case,ens_label,case_ens,time
+                         ,fates_gpp,fates_vegc_aboveground
+                         ,elai,fsh,eflx_lh_tot)            %>% 
+            mutate(alom_grp = case_when(case %in% c("1","4") ~ "AVBA"
+                                       ,case %in% c("2","5") ~ "BRDI"
+                                       ,case %in% c("3","6") ~ "GENL")
+                  ,co2_trt  = if_else(case %in% c("1","2","3")
+                                     ,280,400))            %>% 
+            dplyr::select(-c(case,case_ens))               %>% 
+            pivot_wider(names_from  = co2_trt
+                       ,values_from = c(fates_gpp,fates_vegc_aboveground
+                                       ,elai,fsh,eflx_lh_tot))
+
+delta_co2 = delta_co2                                                          %>% 
+            group_by(alom_grp,ens_label,time)                                  %>% 
+            summarize(fates_gpp               = fates_gpp_400 - fates_gpp_280
+                     ,elai                   = elai_400 - elai_280
+                     ,fates_vegc_aboveground = fates_vegc_aboveground_400 - fates_vegc_aboveground_280
+                     ,fsh                    = fsh_400 - fsh_280
+                     ,eflx_lh_tot            = eflx_lh_tot_400 - eflx_lh_tot_280) %>% 
+            ungroup()
+
+
+
+
+```
 
 
 
