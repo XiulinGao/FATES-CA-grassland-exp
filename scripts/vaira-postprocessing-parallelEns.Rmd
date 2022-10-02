@@ -1824,16 +1824,112 @@ delta_co2 = hlm1d                                          %>%
                        ,values_from = c(fates_gpp,fates_vegc_aboveground
                                        ,elai,fsh,eflx_lh_tot))
 
-delta_co2 = delta_co2                                                          %>% 
-            group_by(alom_grp,ens_label,time)                                  %>% 
-            summarize(fates_gpp               = fates_gpp_400 - fates_gpp_280
-                     ,elai                   = elai_400 - elai_280
-                     ,fates_vegc_aboveground = fates_vegc_aboveground_400 - fates_vegc_aboveground_280
-                     ,fsh                    = fsh_400 - fsh_280
-                     ,eflx_lh_tot            = eflx_lh_tot_400 - eflx_lh_tot_280) %>% 
-            ungroup()
+deltaR_co2 = delta_co2                                                          %>% 
+            group_by(alom_grp,ens_label,time)                                   %>% 
+            mutate(fates_gpp                 = if_else(fates_gpp_400==0
+                                                      ,0
+                                                      ,(fates_gpp_400-fates_gpp_280)/fates_gpp_400)
+                     ,elai                   = if_else(elai_400==0
+                                                      ,0
+                                                      ,(elai_400-elai_280)/elai_400)
+                     ,fates_vegc_aboveground = if_else(fates_vegc_aboveground_400==0
+                     ,0
+                     ,(fates_vegc_aboveground_400-fates_vegc_aboveground_280)/fates_vegc_aboveground_400) 
+                     ,fsh                    = if_else(fsh_400==0
+                                                      ,0
+                                                     ,(fsh_400-fsh_280)/fsh_400)
+                    ,eflx_lh_tot            = (if_else(eflx_lh_tot_400==0
+                                                      ,0
+                                                      ,(eflx_lh_tot_400-eflx_lh_tot_280)/eflx_lh_tot_400)))%>%
+            ungroup()                            %>% 
+            dplyr::select(alom_grp,ens_label,time
+                         ,fates_vegc_aboveground
+                         ,fates_gpp,elai,fsh
+                         ,eflx_lh_tot)
+
+deltaR_mmean = deltaR_co2                        %>% 
+              mutate(month=month(time))          %>% 
+              dplyr::select(-time)               %>% 
+              group_by(alom_grp,ens_label,month) %>% 
+              summarize_all(mean,na.rm=TRUE)     %>% 
+              ungroup()
 
 
+delta_co2   = delta_co2                                                          %>% 
+              group_by(alom_grp,ens_label,time)                                  %>%
+              summarize(fates_gpp = fates_gpp_400 - fates_gpp_280
+                       ,fates_vegc_aboveground = fates_vegc_aboveground_400 - fates_vegc_aboveground_280
+                       ,elai = elai_400 - elai_280
+                       ,eflx_lh_tot = eflx_lh_tot_400 - eflx_lh_tot_280
+                       ,fsh = fsh_400 - fsh_280) %>% 
+              ungroup()
+
+delta_mmean = delta_co2                          %>% 
+              mutate(month=month(time))          %>% 
+              dplyr::select(-time)               %>% 
+              group_by(alom_grp,ens_label,month) %>% 
+              summarize_all(mean,na.rm=TRUE)     %>% 
+              ungroup()
+
+
+delta_loop = which(hlm1dvar$vnam %in% hlm_var)
+
+gg_delta   = list()
+for (h in delta_loop){
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+
+   delta_now        = delta_mmean
+   #mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
+   
+   gg_now = ggplot(data=delta_now)
+   gg_now = gg_now + facet_wrap(.~alom_grp)
+   gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,group="ens_label",color="'Model'")
+                              ,lwd=0.1,alpha=0.8,show.legend=TRUE)
+   
+   gg_now = gg_now + scale_colour_manual(name=""
+                                        ,values=c("Model"= ens_colour[1]))
+   gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=paste0('delta*',h_short),unit=untab[[h_unit]],dxpr=TRUE))
+   #gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "right"
+                         , legend.text=element_text(size=gg_ptsz)
+                         , axis.text.x        = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         ) #end theme
+  
+ 
+   # Save plots.
+   for (d in sequence(ndevice)){
+    h_output = paste0(h_vnam,"_co2DeltaABS.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot      = gg_now
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_width
+                    , height    = gg_height
+                    , units     = gg_units
+                    , dpi       = gg_depth
+                    )
+   }
+  gg_delta[[h_vnam]] = gg_now      
+
+}
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_delta
 
 
 ```
@@ -2858,9 +2954,6 @@ ens_filt    = ens_filt                        %>%
                        ,by=c("month"))        %>%       
               filter(month %in% growing_sea) 
 
-ens_filt    = ens_filt                        %>% 
-              left_join(site_mmean
-                       ,by=c("month"))
 
 #ens_filt    = ens_filt                                                                              %>% 
 #              mutate(eflx_lh_tot_qlwr = if_else(month==3,eflx_lh_tot_qlwr *lw.dec,eflx_lh_tot_qlwr)
@@ -3090,6 +3183,95 @@ if(gg_screen) gg_now
 ```
 
 
+
+
+
+```{r,label="check-co2-effects"}
+
+keep_delta = delta_co2                                     %>% 
+             mutate(case = case_when(alom_grp=="AVBA" ~ 4
+                                    ,alom_grp=="BRDI" ~ 5
+                                    ,alom_grp=="GENL" ~ 6)
+                  ,case_ens = paste0(case,"_",ens_label))  %>% 
+            filter(case_ens %in% ens_keep)
+keep_delta = keep_delta                              %>% 
+             mutate(month = month(time))             %>% 
+             dplyr::select(-c(time,alom_grp))        %>% 
+             group_by(case,ens_label,case_ens,month) %>% 
+             summarize_all(mean,na.rm=TRUE)
+
+keepR_delta = deltaR_co2                                     %>% 
+             mutate(case = case_when(alom_grp=="AVBA" ~ 4
+                                    ,alom_grp=="BRDI" ~ 5
+                                    ,alom_grp=="GENL" ~ 6)
+                  ,case_ens = paste0(case,"_",ens_label))  %>% 
+            filter(case_ens %in% ens_keep)
+keepR_delta = keepR_delta                            %>% 
+             mutate(month = month(time))             %>% 
+             dplyr::select(-c(time,alom_grp))        %>% 
+             group_by(case,ens_label,case_ens,month) %>% 
+             summarize_all(mean,na.rm=TRUE)
+
+delta_loop = which(hlm1dvar$vnam %in% hlm_var)
+
+gg_delta   = list()
+for (h in delta_loop){
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+
+   delta_now        = keep_delta
+   #mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
+   
+   gg_now = ggplot(data=delta_now)
+   gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))
+   gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,colour="ens_label")
+                              ,lwd=1,alpha=0.8,show.legend=TRUE)
+   
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",values=top12)
+   gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
+   gg_now = gg_now + xlab(element_blank())
+   #gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + ylab(desc.unit(desc=paste0('delta*',h_short),unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "right"
+                         , legend.text=element_text(size=gg_ptsz)
+                         , axis.text.x        = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         ) #end theme
+  
+ 
+   # Save plots.
+   for (d in sequence(ndevice)){
+    h_output = paste0(h_vnam,"_co2DeltaKeep.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot      = gg_now
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_width
+                    , height    = gg_height
+                    , units     = gg_units
+                    , dpi       = gg_depth
+                    )
+   }
+  gg_delta[[h_vnam]] = gg_now      
+
+}
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_delta
+             
+
+```
 
 
 
