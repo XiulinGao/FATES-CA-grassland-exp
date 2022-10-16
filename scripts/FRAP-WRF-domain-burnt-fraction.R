@@ -66,7 +66,7 @@ for (n in frap_yrs){
     frap_now      = sf::as_Spatial(frap_now)}else{
     frap_now      = sf::as_Spatial(frap_now)}
   
-  bfrac              = coverage_fraction(wrf_rs,st_combine(st_as_sf(frap_now)))
+  bfrac              = exactextracr::coverage_fraction(wrf_rs,st_combine(st_as_sf(frap_now)))
   bfrac_df           = data.frame(rasterToPoints(bfrac[[1]]))
   names(bfrac_df)[3] = "bfrac"
   bfrac_df$year      = yr_now
