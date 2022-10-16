@@ -23,6 +23,7 @@ wrf_proj = "+proj=lcc +lat_1=30 +lat_0=38
                +lon_0=-70 +lat_2=60 +R=6370000 
             +datum=WGS84 +units=m +no_defs"
 my_theme = theme_bw() + theme(panel.ontop=TRUE, panel.background=element_blank())
+simu_time=c(2000:2020)
 
 wrf_t = nc_open(wrf_path)
 tobt  = ncvar_get(wrf_t,"TBOT")
@@ -119,9 +120,12 @@ grass_bfrac = grass_bfrac                         %>%
               filter(!is.na(mask))
 data.table::fwrite(grass_bfrac,file.path(frap_path,"Bfrac-WRF-grassonly.csv"))
 gsbfrac_amean = grass_bfrac                         %>% 
+                filter(year%in%simu_time)           %>% 
                 dplyr::select(lon,lat,bfrac)        %>% 
                 group_by(lon,lat)                   %>% 
-                summarize_all(mean,na.rm=TRUE)
+                summarize_all(mean,na.rm=TRUE)      %>% 
+                ungroup()                          
+               
 
 ### plot 
 wrf_dfil = gsbfrac_amean 
