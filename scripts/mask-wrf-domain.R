@@ -48,8 +48,8 @@ sp::proj4string(wrf_poly) = wgs
 wrf_nlcd  = spTransform(wrf_poly,crs(nlcd_proj))
 nlcd_wrf  = crop(nlcd,extent(wrf_nlcd))
 nlcd_wrf  = mask(nlcd_wrf, wrf_nlcd)
-#writeRaster(nlcd_wrf,file.path(paste0(wrf_path,"wrf-extent-masked-annual-herb.img")))
 nlcd150_wrf = aggregate(nlcd_wrf, fact=5, fun=mean)
+#writeRaster(nlcd150_wrf,file.path(paste0(wrf_path,"wrf-extent-masked-annual-herb_150mres.img")))
 nlcd80_wrf  = nlcd150_wrf
 #nlcd85_wrf  = nlcd150_wrf
 nlcd80_wrf[nlcd80_wrf[]<80] = NA
@@ -70,41 +70,35 @@ nlcd_ngb  = resample(nlcd80_wgs, wrf_rs, method="ngb")
 
 
 
-nlcdherb_ngb = as.data.frame(nlcd_ngb,xy=TRUE)
-nlcdngb_filt = filter(nlcdherb_ngb, !is.na(layer)) #only keep cells where annual herb cover >=80%
+nlcdherb_ngb  = as.data.frame(nlcd_ngb,xy=TRUE)
+nlcdherb_mean = as.data.frame(nlcd_mean,xy=TRUE)
 
 
-wrf_qry = wrf_df %>% dplyr::select(x_vec,y_vec,cellid)
+
+wrf_qry        = wrf_df %>% dplyr::select(x_vec,y_vec,cellid,tobt_vec)
 wrf_qry$mask80 = 0
 
 #search for the nearest neighbor in wrf for each corresponding filtered nlcd cell
-nn_pt = RANN::nn2(wrf_qry[,1:2],nlcdngb_filt[,1:2],k=1) 
-nlcdngb_filt$close_id = nn_pt$nn.idx #add resulted row index of wrf to nlcd
-nlcdngb_filt$dist = nn_pt$nn.dists
-#filter by distance so we avoid a FALSE near neighbor (that can be 4 degree apart maximum)
-nlcdngb_filt = nlcdngb_filt %>% filter(dist<0.125) 
-output = unique(nlcdngb_filt$close_id)
-n_cell = length(output)
+nn_pt        = RANN::nn2(nlcdherb_ngb[,1:2],wrf_qry[,1:2],k=1) 
+wrf_qry$id   = as.vector(nn_pt$nn.idx) #add resulted row index of wrf to nlcd
+wrf_qry$dist = as.vector(nn_pt$nn.dists)
 
-#here we can also filter cells only inside CA boundaries
-for(i in sequence(n_cell)){
-  index = output[i]
-  lat = wrf_qry$y_vec[index]
-  lon = wrf_qry$x_vec[index]
-  if(lat>=34 && lat<=40 && lon>=-124.5 && lon<=-114.5){ wrf_qry$mask80[index] <- 1}
-}
+wrf_qry = wrf_qry                                     %>% 
+          mutate(cover = nlcdherb_ngb$layer[id])      %>% 
+          mutate(mask80 = ifelse(is.na(cover),0,1))   %>% 
+          mutate(mask80 = ifelse(y_vec>=34 & y_vec<=40 & x_vec>=-124.5 & x_vec<=-114.5
+                                ,mask80,0))
 
-wrf_fil   = wrf_qry %>% dplyr::select(cellid,mask80)
-wrf_dfil  = wrf_df %>% left_join(wrf_fil,by="cellid")
 
-n_loop <- nrow(wrf_dfil)
-for(i in sequence(n_loop)){
-  if(wrf_dfil$mask80[i]==0){wrf_dfil$tobt_vec[i]=NA}else{wrf_dfil$tobt_vec[i]=wrf_dfil$tobt_vec[i]}
-}
+wrf_dfil = wrf_qry                                     %>%  
+           dplyr::select(x_vec,y_vec,mask80,tobt_vec)  %>% 
+           rename(lon=x_vec,lat=y_vec)                 %>% 
+           mutate(tobt_vec = ifelse(mask80==0,NA,tobt_vec))
+
 
 fil_var   = matrix(wrf_dfil$tobt_vec, nrow=147,ncol=151)
-x_arr     = matrix(XLONG,nrow=147,ncol=151)
-y_arr     = matrix(XLAT,nrow=147,ncol=151)
+x_arr     = matrix(wrf_dfil$lon,nrow=147,ncol=151)
+y_arr     = matrix(wrf_dfil$lat,nrow=147,ncol=151)
 wrf_star  = st_as_stars(fil_var)
 wrf_star  = st_as_stars(wrf_star, curvilinear=list(X1=x_arr,X2=y_arr), crs=wgs)
 wrf_sf    = st_as_sf(wrf_star,as_points=FALSE,na.rm=FALSE)
@@ -123,9 +117,8 @@ ggplot() + geom_sf(data=wrf_sf,colour="grey50", aes(fill=A1),lwd=0)+
 ## looks like 80% threshold is the best as it is more inclusive
 
 land_mask80 <- array(wrf_qry$mask80,dim=c(147,151))
-#land_mask85 <- array(wrf_qry$mask85,dim=c(147,151))
 land_mkdif80 <- land_mask80
-#land_mkdif85 <- land_mask85
+
 
 ## create new nc file as land mask
 xx  = ncdim_def( name="lon"   ,units="",vals= sequence(147)  ,create_dimvar=FALSE)
