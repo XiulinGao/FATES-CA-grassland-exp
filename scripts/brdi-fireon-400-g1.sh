@@ -10,8 +10,8 @@
 #               07 Jun 2022 10:24 PDT
 # Based on scripts developed by Chonggang Xu, Ryan Knox and Shawn Serbin.
 #
-# Edit by Xiulin Gao < x i u l i n g a o -at- l b l -dot- g o v>
-# edits are made to run simulations on cheyenne using NUOPC driver
+# Edit by Xiulin Gao <x i u l i n g a o -at- l b l -dot- g o v>
+# edits are made to run ensembles on cheyenne using NUOPC driver
 #     This script does not take any arguments. Instead, the beginning of the script has
 # many variables to control the simulation settings. The script has been tested on Marcos'
 # local computer (eschweilera) and at NERSC (cori-haswell and cori-knl). It is likely
@@ -60,7 +60,7 @@ export MACH="cheyenne"    # Machine used for preparing the case
 #                      using multi-threading (shared memory parallelisation, OpenMP).
 #---~---
 export AUTO_SUBMIT=false
-export PROJECT="your project"
+export PROJECT=PROJECT
 export PARTITION="regular"
 export RUN_TIME="12:00:00"
 export TASKS_PER_NODE=36
@@ -102,8 +102,8 @@ export DEBUG_LEVEL=0
 #                     never give up until convergence, but this risks running indefinitely
 #                     in case the method fails to converge.
 #---~---
-export ENS_R_TEMPLATE="/glade/u/home/user/CTSM/cime/scripts/Ensemble_FATES_Param.r"
-export N_ENSEMBLE=1500
+export ENS_R_TEMPLATE="/glade/u/home/user/CTSM/cime/scripts/Ensemble_FATES_Param_fireon.r"
+export N_ENSEMBLE=500
 export SEED_INIT=6
 export LHS_EPS=0.025
 export LHS_MAXIT=1000
@@ -117,7 +117,7 @@ export LHS_MAXIT=1000
 # WORK_PATH: The main working path (typically <host_model>/cime/scripts)
 # CASE_ROOT: The main path where to create the directory for this case.
 # SIMUL_ROOT: The main path where to create the directory for the simulation output.
-#
+# in all path, user should be replaced with your user name
 # In all cases, use XXXX in the part you want to be replaced with either E3SM or CTSM.
 #---~---
 case "${MACH}" in
@@ -173,7 +173,7 @@ export SITE_BASE_PATH="/glade/work/user/fates-input"
 # script will use default settings.
 #---~---
 export COMP=""
-export CASE_PREFIX="brdi-fireoff-400"
+export CASE_PREFIX="brdi-fireon-400-g1"
 #---~---
 
 
@@ -242,7 +242,7 @@ export SITE_USE=1
 # FATES_PARAMS_FILE with full path.  Leaving the variable empty (i.e., FATES_PARAMS_FILE="")
 # means that we should be using the default parameter file.
 #---~---
-export FATES_PARAMS_FILE="${SITE_BASE_PATH}/vaira-1pt/fates_c3g_brdi_base2.cdl"
+export FATES_PARAMS_FILE="${SITE_BASE_PATH}/vaira-1pt/fireoff-survi-params/fates_params_brdi-fireon-400_g1.cdl"
 #---~---
 
 
@@ -278,7 +278,7 @@ export CONFIG_INFO=("         1   BareGround_InstDD_HydroOFF_FireOFF       NA   
 #    Variable CONFIG_USE lets you pick which configuration setting to use. This is an
 # integer variable that must correspond to one of the config_id listed in CONFIG_INFO.
 #---~---
-export CONFIG_USE=1
+export CONFIG_USE=2
 #---~---
 
 
@@ -394,33 +394,33 @@ prm_settings=("fates_allom_amode                      1         1"
 #            ensemble runs, use the single-run script (create_case_hlm-fates.sh) instead.
 #---~---
 #               parameter                                value_min     value_max   pft   organ
-ens_settings=( "fates_alloc_storage_cushion              1.0            1.5          0      NA"
-               "fates_allom_fnrt_prof_a                  5.             13.          0      NA"
-               "fates_allom_fnrt_prof_b                  3.             10.          0      NA"
-              # "fates_fire_FBD                           4.             22.          NA     5"
-              # "fates_fire_FBD                           1.             4.           NA     6"
-              # "fates_fire_nignitions                    0.01           1.           NA     NA"
-              # "fates_fire_drying_ratio                  66             66000        NA     NA"
-              # "fates_fire_fuel_energy                   6450           14300        NA     NA"
-               "fates_frag_maxdecomp                     0.8            1.6          NA     5"
-               "fates_grperc                             0.1            0.5          0      NA"
-               "fates_leaf_slatop                        0.015          0.072        0      NA"
-               "fates_leaf_slamax                        0.015          0.072        0      NA"
-               "fates_leaf_stomatal_intercept            10000          2030000      0      NA"
-               "fates_leaf_stomatal_slope_ballberry      5.25           17.          0      NA"
-               "fates_leaf_vcmax25top                    35.6           91.6         0      NA"
+ens_settings=( #"fates_alloc_storage_cushion              1.0            1.5          0      NA"
+               #"fates_allom_fnrt_prof_a                  5.             13.          0      NA"
+               #"fates_allom_fnrt_prof_b                  3.             10.          0      NA"
+               "fates_fire_FBD                           4.             22.          NA     5"
+               "fates_fire_FBD                           1.             4.           NA     6"
+               "fates_fire_nignitions                    0.01           1.           NA     NA"
+               "fates_fire_drying_ratio                  66             66000        NA     NA"
+               "fates_fire_fuel_energy                   6450           14300        NA     NA")
+              # "fates_frag_maxdecomp                     0.8            1.6          NA     5"
+              # "fates_grperc                             0.1            0.5          0      NA"
+              # "fates_leaf_slatop                        0.015          0.072        0      NA"
+              # "fates_leaf_slamax                        0.015          0.072        0      NA"
+              # "fates_leaf_stomatal_intercept            10000          2030000      0      NA"
+              # "fates_leaf_stomatal_slope_ballberry      5.25           17.          0      NA"
+              # "fates_leaf_vcmax25top                    35.6           91.6         0      NA"
               # "fates_mort_hf_sm_threshold               0.25           0.9          0      NA"
-               "fates_mort_scalar_cstarvation            1.             6.           0      NA"
-               "fates_mort_scalar_hydrfailure            3.             20.          0      NA"
-               "fates_nonhydro_smpsc                    -200000        -60000        0      NA"
-               "fates_nonhydro_smpso                    -60000         -33000        0      NA"
-               "fates_phen_drought_threshold             0.1            0.23         0      NA"
-               "fates_recruit_seed_dbh_repro_threshold   1.5            4.           0      NA"
-               "fates_recruit_seed_alloc_mature          0.1            1.           0      NA"
-               "fates_recruit_height_min                 0.1            0.5          0      NA"
-               "fates_stoich_nitr                        0.01           0.06         0      1" 
-               "fates_turb_leaf_diameter                 0.01           0.04         0      NA"
-               "fates_turnover_leaf                      0.02           0.32         0      NA")
+              # "fates_mort_scalar_cstarvation            1.             6.           0      NA"
+              # "fates_mort_scalar_hydrfailure            3.             20.          0      NA"
+              # "fates_nonhydro_smpsc                    -200000        -60000        0      NA"
+              # "fates_nonhydro_smpso                    -60000         -33000        0      NA"
+              # "fates_phen_drought_threshold             0.1            0.23         0      NA"
+              # "fates_recruit_seed_dbh_repro_threshold   1.5            4.           0      NA"
+              # "fates_recruit_seed_alloc_mature          0.1            1.           0      NA"
+              # "fates_recruit_height_min                 0.1            0.5          0      NA"
+              # "fates_stoich_nitr                        0.01           0.06         0      1" 
+              # "fates_turb_leaf_diameter                 0.01           0.04         0      NA"
+              # "fates_turnover_leaf                      0.02           0.32         0      NA")
 # ---~---
 
 
@@ -467,9 +467,10 @@ ens_settings=( "fates_alloc_storage_cushion              1.0            1.5     
 #            ensemble runs, use the single-run script (create_case_hlm-fates.sh) instead.
 #---~---
 #               parameter_a                   parameter_b                    pft  organ     corr
-cor_settings=( "fates_leaf_slamax             fates_leaf_slatop              0    NA        1"
-               "fates_leaf_slamax             fates_stoich_nitr              0    1         0.31"
-               "fates_leaf_slatop             fates_stoich_nitr              0    1         0.31")
+#cor_settings=( "fates_leaf_slamax             fates_leaf_slatop              0    NA        1"
+#               "fates_leaf_slamax             fates_stoich_nitr              0    1         0.31"
+#               "fates_leaf_slatop             fates_stoich_nitr              0    1         0.31")
+cor_settings=()
 #---~---
 
 
@@ -542,8 +543,8 @@ hlm_variables=("AR                                            no    clm+elm     
                "FATES_BGSAPMAINTAR_SZPF                      yes    clm+elm      yes       no       no"
                "FATES_BGSAPWOOD_ALLOC_SZPF                   yes    clm+elm      yes       no       no"
                "FATES_BGSTRUCT_ALLOC_SZPF                    yes    clm+elm      yes       no       no"
-#              "FATES_BURNFRAC                               yes    clm+elm      yes       no       no"
-#              "FATES_BURNFRAC_AP                            yes    clm+elm      yes       no       no"
+               "FATES_BURNFRAC                               yes    clm+elm      yes       no       no"
+               "FATES_BURNFRAC_AP                            yes    clm+elm      yes       no       no"
                "FATES_CANOPYAREA_AP                          yes    clm+elm      yes       no       no"
                "FATES_CANOPYAREA_HT                          yes    clm+elm      yes       no       no"
                "FATES_DAYSINCE_DROUGHTLEAFOFF                yes    clm+elm      yes       no       no"
@@ -553,12 +554,14 @@ hlm_variables=("AR                                            no    clm+elm     
                "FATES_DEMOTION_RATE_SZ                       yes    clm+elm      yes       no       no"
                "FATES_DROUGHT_STATUS                         yes    clm+elm      yes       no       no"
                #"FATES_ELONG_FACTOR_PF                        yes    clm+elm      yes       no       no"
-#               "FATES_FIRE_INTENSITY                         yes    clm+elm      yes       yes      no"
-#               "FATES_FIRE_INTENSITY_BURNFRAC                yes    clm+elm      yes       yes      no"
-#               "FATES_FUEL_BULKD                             yes    clm+elm      yes       yes      no"
+               "FATES_FDI                                    yes    clm+elm      yes       no       no"
+               "FATES_FIRE_INTENSITY                         yes    clm+elm      yes       no       no"
+               "FATES_FIRE_INTENSITY_BURNFRAC                yes    clm+elm      yes       no       no"
+               "FATES_FUEL_BULKD                             yes    clm+elm      yes       no       no"
                "FATES_FUEL_AMOUNT                            yes    clm+elm      yes       no       no"
                "FATES_FUEL_AMOUNT_FC                         yes    clm+elm      yes       no       no"
                "FATES_FUEL_AMOUNT_APFC                       yes    clm+elm      yes       no       no"
+               "FATES_FUELCONSUMED                           yes    clm+elm      yes       no       no"
                "FATES_FUEL_MOISTURE_FC                       yes    clm+elm      yes       no       no"
                "FATES_FRAGMENTATION_SCALER_SL                yes    clm+elm      yes       no       no"
                "FATES_FROOT_ALLOC_SZPF                       yes    clm+elm      yes       no       no"
@@ -577,8 +580,9 @@ hlm_variables=("AR                                            no    clm+elm     
                "FATES_LEAF_ALLOC_SZPF                        yes    clm+elm      yes       no       no"
                "FATES_LEAFC_CANOPY_SZPF                      yes    clm+elm      yes       no       no"
                "FATES_LEAFC_USTORY_SZPF                      yes    clm+elm      yes       no       no"
+               "FATES_LITTER_AG_FINE_EL                      yes    clm+elm      yes       no       no"
                "FATES_LITTER_IN                              yes    clm+elm      yes       no       no"
-               "FATES_LITTER_OUT                             yes    clm+elm      yes       no       no"
+#               "FATES_LITTER_OUT                             yes    clm+elm      yes       no       no"
                "FATES_MEANLIQVOL_DROUGHTPHEN                 yes    clm+elm      yes       no       no"
 #               "FATES_MEANSMP_DROUGHTPHEN_PF                 yes    clm+elm      yes       no       no"
                "FATES_MORTALITY_AGESCEN_SZPF                 yes    clm+elm      yes       no       no"
@@ -600,6 +604,7 @@ hlm_variables=("AR                                            no    clm+elm     
                "FATES_MORTALITY_TERMINATION_SZPF             yes    clm+elm      yes       no       no"
                "FATES_MORTALITY_USTORY_SZPF                  yes    clm+elm      yes       no       no"
                "FATES_NEP                                    yes    clm+elm      yes       no       no"
+               "FATES_NESTEROV_INDEX                         yes    clm+elm      yes       no       no"
                "FATES_NPLANT_CANOPY_SZPF                     yes    clm+elm      yes       no       no"
                "FATES_NPLANT_USTORY_SZPF                     yes    clm+elm      yes       no       no"
                "FATES_NPP_SZPF                               yes    clm+elm      yes       no       no"
@@ -609,7 +614,7 @@ hlm_variables=("AR                                            no    clm+elm     
                "FATES_PROMOTION_RATE_SZ                      yes    clm+elm      yes       no       no"
                "FATES_RDARK_SZPF                             yes    clm+elm      yes       no       no"
                "FATES_RECRUITMENT_PF                         yes    clm+elm      yes       no       no"
-#               "FATES_ROS                                    yes    clm+elm      yes       no       no"
+               "FATES_ROS                                    yes    clm+elm      yes       no       no"
                "FATES_SAI_CANOPY_SZ                          yes    clm+elm      yes       no       no"
                "FATES_SAI_USTORY_SZ                          yes    clm+elm      yes       no       no"
                "FATES_SEED_ALLOC_SZPF                        yes    clm+elm      yes       no       no"
