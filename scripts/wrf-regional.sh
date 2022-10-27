@@ -556,6 +556,7 @@ cd ${CASE_PATH}
 ./xmlchange PIO_DEBUG_LEVEL="${DEBUG_LEVEL}"
 ./xmlchange JOB_WALLCLOCK_TIME="${RUN_TIME}"
 ./xmlchange JOB_QUEUE="${PARTITION}"
+./xmlchange PIO_TYPENAME="pnetcdf"
 
 #---~---
 
@@ -614,7 +615,6 @@ esac
 ./xmlchange ROOTPE_WAV=0
 ./xmlchange ROOTPE_ESP=0
 
-./xmlchange PIO_TYPENAME="pnetcdf"
 #---~---
 
 
@@ -705,40 +705,40 @@ esac
 # available.  You should not need to change anything in here.
 #---~---
 # Find the first met driver.
-case "${RESOL}" in
-?LM_USRDAT)
+#case "${RESOL}" in
+#?LM_USRDAT)
    #--- Define files with meteorological driver settings.
-   HLM_USRDAT_ORIG="${SIMUL_PATH}/run/datm.streams.txt.CLM1PT.${RESOL}"
-   HLM_USRDAT_USER="${SIMUL_PATH}/user_datm.streams.txt.CLM1PT.${RESOL}"
+#   HLM_USRDAT_ORIG="${SIMUL_PATH}/run/datm.streams.txt.CLM1PT.${RESOL}"
+#   HLM_USRDAT_USER="${SIMUL_PATH}/user_datm.streams.txt.CLM1PT.${RESOL}"
    #---~---
    
 
-   ANY_METD_NC=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | wc -l)
-   if [[ ${ANY_METD_NC} ]]
-   then
+#   ANY_METD_NC=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | wc -l)
+#   if [[ ${ANY_METD_NC} ]]
+#   then
       #--- Load one netCDF file.
-       METD_NC_1ST=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | head -1)
-      ANY_FLDS=$(ncdump -h ${METD_NC_1ST} 2> /dev/null | grep FLDS | wc -l)
-      if [[ ${ANY_FLDS} -eq 0 ]]
-      then
+#       METD_NC_1ST=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | head -1)
+#      ANY_FLDS=$(ncdump -h ${METD_NC_1ST} 2> /dev/null | grep FLDS | wc -l)
+#      if [[ ${ANY_FLDS} -eq 0 ]]
+#      then
          #--- Incoming long wave radiation is absent.  Modify the stream file
-         /bin/cp ${HLM_USRDAT_ORIG} ${HLM_USRDAT_USER}
-         $(sed -i '@FLDS@d' ${HLM_USRDAT_USER})
+#         /bin/cp ${HLM_USRDAT_ORIG} ${HLM_USRDAT_USER}
+#         $(sed -i '@FLDS@d' ${HLM_USRDAT_USER})
          #---~---
-      fi
+#      fi
       #---~---
-   else
+#   else
       #--- Report error.
-      echo "FATAL ERROR!"
-      echo " ANY_METD_NC = ${ANY_METD_NC}"
-      echo " Meteorological drivers not found in ${DATM_PATH}".
-      echo " Make sure all the met driver files are named as yyyy-mm.nc"
-      exit 91
+#      echo "FATAL ERROR!"
+#      echo " ANY_METD_NC = ${ANY_METD_NC}"
+#      echo " Meteorological drivers not found in ${DATM_PATH}".
+#      echo " Make sure all the met driver files are named as yyyy-mm.nc"
+#      exit 91
       #---~---
-   fi
+#   fi
    #---~---
-   ;;
-esac
+#   ;;
+#esac
 #---~---
 
 
