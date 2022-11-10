@@ -21,7 +21,7 @@
 
 #--- Main settings.
 export HESM="CTSM"              # Host "Earth System Model". (E3SM, CESM, CTSM)
-export PROJECT=PROJECT          # Project (may not be needed)
+export PROJECT="your project"   # Project (may not be needed)
 export MACH="cheyenne"          # Machine used for preparing the case
 export PARTITION="regular"
 export RUN_TIME="12:00:00"
@@ -62,8 +62,8 @@ export USE_FATES=true
 # In all cases, use XXXX in the part you want to be replaced with either E3SM or CTSM.
 #---~---
 export WORK_PATH="${HOME}/XXXX/cime/scripts"
-export CASE_ROOT="/glade/work/user/Regional-WRF/Cases"
-export SIMUL_ROOT="/glade/scratch/user/Regional-WRF/Simulations"
+export CASE_ROOT="/glade/work/xiugao/Regional-WRF/Cases"
+export SIMUL_ROOT="/glade/scratch/xiugao/Regional-WRF/Simulations"
 #---~---
 
 
@@ -73,7 +73,8 @@ export SIMUL_ROOT="/glade/scratch/user/Regional-WRF/Simulations"
 # script will use default settings.
 #---~---
 export COMP=""
-export CASE_PREFIX="wrf-regional-test2"
+export CASE_PREFIX="regional-meanBF-brdi-N09T04"
+#export CASE_PREFIX="test"
 #---~---
 
 
@@ -115,7 +116,7 @@ export RESOL="YYY_USRDAT" # Grid resolution
 #     might be needed for FATES).
 #---~---
 # Path containing all the data sets.
-export SITE_BASE_PATH="/glade/work/user/fates-input"
+export SITE_BASE_PATH="/glade/work/xiugao/fates-input"
 # Sub-directory with data sets specific to this site.
 export SITE_NAME="ca-wrf-grassland"
 # mesh file (it must be in the SITE_NAME sub-directory).
@@ -136,7 +137,7 @@ export METD_CALENDAR="NO_LEAP"
 # (i.e. FATES_PARAMS_BASE=""), the case will use the default parameters, but beware that
 # results may be very bad.
 #---~---
-export FATES_PARAMS_BASE="avba-g1-node13-task001.cdl"
+export FATES_PARAMS_BASE="regional_mean_brdi-g3-node09-task04.cdl"
 #---~---
 
 
@@ -175,7 +176,8 @@ xml_settings=("DEBUG                             FALSE"
               "RUN_STARTDATE                     1981-01-01"
               "STOP_N                            40"
               "STOP_OPTION                       nyears"
-              "REST_N                            1"
+              "REST_N                            5"
+#              "RESUBMIT                          5"
               "YYY_FORCE_COLDSTART               on"
               "DATM_YR_START                     1981"
               "DATM_YR_END                       2020")
@@ -557,7 +559,7 @@ cd ${CASE_PATH}
 ./xmlchange JOB_WALLCLOCK_TIME="${RUN_TIME}"
 ./xmlchange JOB_QUEUE="${PARTITION}"
 ./xmlchange PIO_TYPENAME="pnetcdf"
-
+./xmlchange DOUT_S_SAVE_INTERIM_RESTART_FILES="TRUE"
 #---~---
 
 
@@ -585,14 +587,14 @@ esac
 #---~---
 #     Set the PE layout for a single-site run (unlikely that users would change this).
 #---~---
-./xmlchange NTASKS_ATM=1
+./xmlchange NTASKS_ATM=-4
 ./xmlchange NTASKS_LND=-4
-./xmlchange NTASKS_ROF=1
-./xmlchange NTASKS_ICE=1
-./xmlchange NTASKS_OCN=1
-./xmlchange NTASKS_CPL=1
-./xmlchange NTASKS_GLC=1
-./xmlchange NTASKS_WAV=1
+./xmlchange NTASKS_ROF=-4
+./xmlchange NTASKS_ICE=-4
+./xmlchange NTASKS_OCN=-4
+./xmlchange NTASKS_CPL=-4
+./xmlchange NTASKS_GLC=-4
+./xmlchange NTASKS_WAV=-4
 ./xmlchange NTASKS_ESP=1
 
 ./xmlchange NTHRDS_ATM=1
@@ -659,11 +661,14 @@ DATM_PATH="${SITE_PATH}/CLM1PT_data"
 
 #--- List all files with full path so we can append this to user_nl_datm
 
-#DATM_FILE=$(/bin/ls -d -m ${DATM_PATH}/*.nc | tr '\n' '\\')
+DATM_FILE=$(/bin/ls -m ${DATM_PATH}/{1981..2020}*.nc)
+SOLAR_FILE="CLMGSWP3v1.Solar:datafiles = ${DATM_FILE}"
+PRECIP_FILE="CLMGSWP3v1.Precip:datafiles = ${DATM_FILE}"
+TPQW_FILE="CLMGSWP3v1.TPQW:datafiles = ${DATM_FILE}"
 
 # if specific forcing files (e.g. files between 1981 and 2020,usually same as DATM_YR_START and DATM_YR_END) are needed instead of all files 
 
-DATM_FILE=$(/bin/ls -d -m ${DATM_PATH}/{1981..2020}*.nc | tr '\n' '\\')
+#DATM_FILE=$(/bin/ls -d -m ${DATM_PATH}/{1981..2020}*.nc | tr '\n' '\\')
 
 #---~---
 #    Append the surface and forcing data information to the namelist, in case we are using 
@@ -676,13 +681,13 @@ case "${RESOL}" in
   echo "fsurdat = '${HLM_SURDAT_FILE}'"    >> ${USER_NL_HLM}
   echo "CLMGSWP3v1.Solar:mapalgo = none"   >> ${USER_NL_DATM}
   echo "CLMGSWP3v1.Solar:meshfile = none"  >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.Solar:datafiles = '${DATM_FILE}'" >> ${USER_NL_DATM}                                                                                     
+  echo "${SOLAR_FILE}" | sed -e 's/$/ \\/' -e '$s/ \\$//' >> ${USER_NL_DATM}
   echo "CLMGSWP3v1.Precip:mapalgo = none"  >> ${USER_NL_DATM}
   echo "CLMGSWP3v1.Precip:meshfile = none" >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.Precip:datafiles = '${DATM_FILE}'" >> ${USER_NL_DATM}                                                                                    
+  echo "${PRECIP_FILE}" | sed -e 's/$/ \\/' -e '$s/ \\$//' >> ${USER_NL_DATM}
   echo "CLMGSWP3v1.TPQW:mapalgo = none"    >> ${USER_NL_DATM}
   echo "CLMGSWP3v1.TPQW:meshfile = none"   >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.TPQW:datafiles = '${DATM_FILE}'" >> ${USER_NL_DATM}                                                                                     
+  echo "${TPQW_FILE}" | sed -e 's/$/ \\/' -e '$s/ \\$//'  >> ${USER_NL_DATM}
    ;;
 esac
 #---~---
@@ -691,7 +696,6 @@ esac
 #--- Preview namelists
 ./preview_namelists
 #---~---
-
 
 
 #---~---
@@ -705,8 +709,8 @@ esac
 # available.  You should not need to change anything in here.
 #---~---
 # Find the first met driver.
-#case "${RESOL}" in
-#?LM_USRDAT)
+# case "${RESOL}" in
+# ?LM_USRDAT)
    #--- Define files with meteorological driver settings.
 #   HLM_USRDAT_ORIG="${SIMUL_PATH}/run/datm.streams.txt.CLM1PT.${RESOL}"
 #   HLM_USRDAT_USER="${SIMUL_PATH}/user_datm.streams.txt.CLM1PT.${RESOL}"
