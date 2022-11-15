@@ -1,17 +1,14 @@
 ---
-title: "WRF-CLM-forcing"
-author: "Xiulin Gao"
-Date: "July-2022"
+title: "WRF-CLM-forcing.Rmd"
+author: "Xiulin Gao < xiulingao@lbl.gov>"
+date:   "2022-07-01"
+output: html_document
 ---
 
-#Introduction
-
-This scripts reformat WRF down-scaled 9km climate driver for western US to 
-CLM readable forcing files. Data is subset to only cover CA region for year 1981-2020. 
 
 
 
-```{r}
+```{r, label="load-package"}
 library(ncdf4)
 library(lubridate)
 library(tidyverse)
@@ -26,8 +23,10 @@ library(data.table)
 
 
 
-```{r,label="intial-settings"}
 
+
+
+```{r,label="path-setting"}
 main_path <- file.path('/global/cfs/cdirs/m3298/CA_grass/9km-WRF_1980-2021')
 out_path <- file.path(main_path,"WRF-out")
 dirs <- list.dirs(main_path)
@@ -36,14 +35,14 @@ dirs <- dirs[grepl("d02", dirs)]
 
 
 wrf_met <- c("PSFC","T2","Q2","SWDNB","LWDNB","RAINC","RAINNC","U10","V10")
-
 ```
 
 
 
 
-```{r,label="data-info"}
 
+
+```{r,label="author-data-info"}
 author_name   <- "Xiulin Gao"
 author_email  <- "xiulingao@lbl.gov"
 datprov_name  <- "Stefan Rahimi"
@@ -60,15 +59,14 @@ dat_version <- "v1-1"
 site_refhgt <-   30
 dxy         <-   9000
 undef       <- -9999.0000
-
 ```
 
 
 
 
 
-```{r,label="region-mask"}
 
+```{r,label="dimension-setting"}
 lon_bnds <- c(-124.5, -114) # bounds for California, used for data subset
 lat_bnds <- c(32.5, 42)
 
@@ -103,20 +101,20 @@ XLONG <- as.vector(x_sub)
 XLAT <- as.vector(y_sub)
 
 ##### set dir to read
-#### currently, this is done by manually looping through each folder to avoid kernel crash due to memory issue
-dir_now <- dirs[42]
+# currently, this is done by manually looping through each folder to avoid kernel crash due to memory issue
+dir_now <- dirs[41]
 files_now <- list.files(dir_now, pattern="auxhist_")
 XLONG_co <- rep(XLONG,times=length(files_now))
 XLAT_co <- rep(XLAT,times=length(files_now))
-
 ```
 
 
 
 
 
-```{r,label="concatenate-file-fun"}
 
+
+```{r,label="concat-file-funcation"}
 read_met <-function(filename) {
   time_now <- substr(filename,73,94)
   time_now <- ymd_hms(time_now)
@@ -137,7 +135,7 @@ read_met <-function(filename) {
 
 
 
-```{r,label="parallel-processing"}
+```{r,label="concat-file"}
 ## parallel using foreach and doParallel packages
 ## reference: https://stackoverflow.com/questions/38318139/run-a-for-loop-in-parallel-in-r
 ## !!!! only run this till all the data combined into one big annual file!!!!!!
@@ -175,7 +173,9 @@ stopCluster(cl)
 
 
 
-```{r,label="output-setting"}
+
+
+```{r,label="data-attr"}
 # Labels for describing the data set.
 ymd_now = today(tzone = "UTC")
 ymd_lab = sprintf("%4.4i%2.2i%2.2i",year(ymd_now),month(ymd_now),day(ymd_now))
@@ -185,6 +185,7 @@ reg_tag  = paste0("9km_",xid,"_", dat_version,"_c",ymd_lab)
 
 # output path
 metd_path = file.path(out_path,reg_tag)
+#metd_path = file.path(out_path,"9km_California_v1-1_c20220719")
 
 # create dir
 dummy = dir.create(path=metd_path  ,showWarnings=FALSE,recursive=TRUE) #only run once
@@ -195,93 +196,10 @@ dummy = dir.create(path=metd_path  ,showWarnings=FALSE,recursive=TRUE) #only run
 
 
 
-```{r,label="standardize-unit-name"}
-
-hr_2_sec <- 3600
-#met_all <- final_met
-
-df_files <- list.files(out_path,pattern=".csv$")
-df_paths <- file.path(out_path,df_files)
-
-
-## write out monthly forcing file
-for(i in seq(length(df_paths))){
-    met_all <- fread(df_paths[i])
-
-met_all <- met_all %>% mutate(WIND = U10*U10 + V10*V10,
-                                PRECIP = RAINC+RAINNC) %>% 
-                         dplyr::select(-c("RAINC","RAINNC","U10","V10"))
-
-met_all <- met_all %>% mutate(WIND = sqrt(WIND))
-
-met_all <- met_all %>% group_by(XLONG,XLAT) %>% 
-  mutate(PPT = PRECIP - lag(PRECIP,default=NA)) %>% ungroup()
-
-met_all <- met_all %>% mutate(PPT = PPT/hr_2_sec) %>% select(c("XLONG","XLAT","time",
-                                                         "PSFC","T2","Q2","PPT",
-                                                         "WIND","SWDNB","LWDNB")) %>% 
-  rename(PSRF=PSFC,
-         TBOT=T2,
-         QBOT=Q2,
-         PRECTmms=PPT,
-         FSDS=SWDNB,
-         FLDS=LWDNB)
-
-dt <- mean(diff(unique(met_all$time))) 
-dt.utc <- make_difftime(hour=0) - 0.5*dt
-met_all <- met_all %>% mutate(time = time + dt.utc) 
-met_all <- met_all %>% filter(!is.na(PRECTmms))
-
- 
-}
 
 
 
-```
-
-
-
-
-```{r,label="split-file"}
-# split data by year and month
-met_out <- met_all                                        %>% 
-           mutate( year = year(time), month=month(time))  %>%
-           group_split(year, month, .keep=FALSE)
-
-nmet = length(met_out)
-
-```
-
-
-
-
-```{r, label="global-attributes"}
-## global attributes
-
-# Define the template.  We will update the title in each time step.
-att_template = list( title          = "To be replaced when looping through months"
-                     , version        = dat_version
-                     , date_created   = paste0(as.character(now(tzone="UTC")), "UTC")
-                     , source_code    = "WRF-CLM-forcing.R"
-                     , code_notes     = "Meteorological drivers compatible with ELM-FATES and CLM-FATES"
-                     , code_developer = paste0( intToUtf8(rev(developer_name))
-                                                ," <"
-                                                , intToUtf8(rev(developer_email))
-                                                ,">"
-                     )#end paste0
-                     , file_author    = paste0(author_name," <",author_email,">")
-                     , data_provider  = paste0(datprov_name," <",datprov_email,">")
-                     , usage_notes    = data_usage_notes
-)#end list
-```
-
-
-
-
-
-
-
-```{r,label="FATES-forcing-info"}
+```{r,label="forcing-variable"}
 ######### FATES forcing variables ########
 
 n       = 0
@@ -347,14 +265,101 @@ varinfo[[n]] = list( vfates = "FLDS"
 
 # Convert varinfo to a "tibble" object
 varinfo  = do.call(what=rbind,args=lapply(X=varinfo,FUN=as_tibble,stringsAsFactors=FALSE))
-
 ```
 
 
 
 
 
-```{r,label="create-monthly-forcing"}
+
+
+
+
+
+```{r,label="global-attr"}
+## global attributes
+
+# Define the code developer information (indirect way so the email is not visible).
+developer_name  =  c(111L,97L,71L,32L,110L,105L,108L,117L,110L,105L,88L)
+developer_email  = c(118L,111L,103L,46L,108L,98L,108L,64L,111L,97L,103L,110L,105L,108L,117L,105L,120L)
+
+
+# Define the template.  We will update the title in each time step.
+att_template = list( title          = "To be replaced when looping through months"
+                     , version        = dat_version
+                     , date_created   = paste0(as.character(now(tzone="UTC")), "UTC")
+                     , source_code    = "WRF-CLM-forcing.R"
+                     , code_notes     = "Meteorological drivers compatible with ELM-FATES and CLM-FATES"
+                     , code_developer = paste0( intToUtf8(rev(developer_name))
+                                                ," <"
+                                                , intToUtf8(rev(developer_email))
+                                                ,">"
+                     )#end paste0
+                     , file_author    = paste0(author_name," <",author_email,">")
+                     , data_provider  = paste0(datprov_name," <",datprov_email,">")
+                     , usage_notes    = data_usage_notes
+)#end list
+
+######### FATES forc
+```
+
+
+
+
+
+
+
+
+
+```{r,label="monthly-file"}
+
+hr_2_sec <- 3600
+#met_all <- final_met
+
+df_files <- list.files(out_path,pattern=".csv$")
+df_paths <- file.path(out_path,df_files)
+n_path   <- length(df_paths)
+#print(df_paths)
+
+
+## write out monthly forcing file
+for(i in sequence(n_path)){
+    
+    met_all <- fread(df_paths[i])
+
+    met_all <- met_all %>% mutate(WIND = U10*U10 + V10*V10,
+                                PRECIP = RAINC+RAINNC) %>% 
+                         dplyr::select(-c("RAINC","RAINNC","U10","V10"))
+
+    met_all <- met_all %>% mutate(WIND = sqrt(WIND))
+    met_all$lon_f = factor(met_all$XLONG,levels=unique(met_all$XLONG))
+    met_all$lat_f = factor(met_all$XLAT,levels=unique(met_all$XLAT))
+
+    met_all <- met_all %>% group_by(lon_f,lat_f) %>% 
+               mutate(PPT = PRECIP - lag(PRECIP,default=NA)) %>% ungroup()
+
+    met_all <- met_all %>% mutate(PPT = PPT/hr_2_sec) %>% select(c("XLONG","XLAT","time",
+                                                         "PSFC","T2","Q2","PPT",
+                                                         "WIND","SWDNB","LWDNB")) %>% 
+                           rename(PSRF=PSFC,
+                           TBOT=T2,
+                           QBOT=Q2,
+                           PRECTmms=PPT,
+                           FSDS=SWDNB,
+                           FLDS=LWDNB)
+
+    dt <- mean(diff(unique(met_all$time))) 
+    dt.utc <- make_difftime(hour=0) - 0.5*dt
+    met_all <- met_all %>% mutate(time = time + dt.utc) 
+    met_all <- met_all %>% filter(!is.na(PRECTmms))
+
+# split data by year and month
+    met_out <- met_all %>% 
+                mutate( year = year(time), month=month(time)) %>%
+                group_split(year,month,.keep=FALSE)
+
+    nmet = length(met_out)
+    
 ###### loop through each month to create forcing output #######
 
 for (m in sequence(nmet)){
@@ -392,8 +397,8 @@ for (m in sequence(nmet)){
   # we append variable time manually.
   xx  <- ncdim_def( name="lon"   ,units="",vals= sequence(xdim)   ,create_dimvar=FALSE)
   yy  <- ncdim_def( name="lat"   ,units="",vals= sequence(ydim)   ,create_dimvar=FALSE)
-  tt  <- ncdim_def( name="time"  ,units="",vals=seq_along(tsince),create_dimvar=FALSE)
-  ss  <- ncdim_def( name="scalar",units="",vals=1L               ,create_dimvar=FALSE)
+  tt  <- ncdim_def( name="time"  ,units="",vals=seq_along(tsince) ,create_dimvar=FALSE)
+  ss  <- ncdim_def( name="scalar",units="",vals=1L                ,create_dimvar=FALSE)
   
   # List of dimensions, useful for setting variables.   
   nc_xy  = list   (xx,yy)
@@ -483,7 +488,7 @@ for (m in sequence(nmet)){
   nc_title   = paste0( "Meteorological forcing for ",reg_desc
                        , "(",month.abb[month_this]," ",year_this,")"
   )#end paste0
-  att_global = modifyList( x = att_template, val = list( title = nc_title ))
+  att_global = modifyList( x = att_template, val = list(title = nc_title))
   
   
   # Loop through global attributes
@@ -500,5 +505,12 @@ for (m in sequence(nmet)){
   # Close the file
   dummy = nc_close(nc_conn)
 }#end for (m in sequence(nmet))
+    rm(met_all)
+    }#end for(i in sequence(length(df_paths))
+
+
+
 ```
+
+
 
