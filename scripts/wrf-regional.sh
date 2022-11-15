@@ -21,8 +21,8 @@
 
 #--- Main settings.
 export HESM="CTSM"              # Host "Earth System Model". (E3SM, CESM, CTSM)
-export PROJECT="your project"   # Project (may not be needed)
-export MACH="cheyenne"          # Machine used for preparing the case
+export PROJECT="ULBN0002"            # Project (may not be needed)
+export MACH="cheyenne"       # Machine used for preparing the case
 export PARTITION="regular"
 export RUN_TIME="12:00:00"
 #---~---
@@ -73,7 +73,7 @@ export SIMUL_ROOT="/glade/scratch/xiugao/Regional-WRF/Simulations"
 # script will use default settings.
 #---~---
 export COMP=""
-export CASE_PREFIX="regional-meanBF-brdi-N09T04"
+export CASE_PREFIX="regional-median-genl-N12T18"
 #export CASE_PREFIX="test"
 #---~---
 
@@ -137,7 +137,7 @@ export METD_CALENDAR="NO_LEAP"
 # (i.e. FATES_PARAMS_BASE=""), the case will use the default parameters, but beware that
 # results may be very bad.
 #---~---
-export FATES_PARAMS_BASE="regional_mean_brdi-g3-node09-task04.cdl"
+export FATES_PARAMS_BASE="regional_median_genl-g1-node12-task18.cdl"
 #---~---
 
 
@@ -177,7 +177,7 @@ xml_settings=("DEBUG                             FALSE"
               "STOP_N                            40"
               "STOP_OPTION                       nyears"
               "REST_N                            5"
-#              "RESUBMIT                          5"
+#              "RESUBMIT                          2"
               "YYY_FORCE_COLDSTART               on"
               "DATM_YR_START                     1981"
               "DATM_YR_END                       2020")
@@ -677,17 +677,23 @@ case "${RESOL}" in
 ?LM_USRDAT)
    # Append surface data file to the namelist.
    HLM_SURDAT_FILE="${SITE_PATH}/${HLM_USRDAT_SURDAT}"
-   
+   MESH_FILE="${SITE_PATH}/${HLM_USRDAT_DOMAIN}"
   echo "fsurdat = '${HLM_SURDAT_FILE}'"    >> ${USER_NL_HLM}
-  echo "CLMGSWP3v1.Solar:mapalgo = none"   >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.Solar:meshfile = none"  >> ${USER_NL_DATM}
+  echo "CLMGSWP3v1.Solar:mapalgo = nn"   >> ${USER_NL_DATM}
+  echo "CLMGSWP3v1.Solar:tintalgo = linear" >> ${USER_NL_DATM}
+  echo "CLMGSWP3v1.Solar:meshfile = ${MESH_FILE}"  >> ${USER_NL_DATM}
   echo "${SOLAR_FILE}" | sed -e 's/$/ \\/' -e '$s/ \\$//' >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.Precip:mapalgo = none"  >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.Precip:meshfile = none" >> ${USER_NL_DATM}
+#  echo "CLMGSWP3v1.Solar:datafiles = '${DATM_FILE}'" >> ${USER_NL_DATM}                                                                                     
+  echo "CLMGSWP3v1.Precip:mapalgo = nn"  >> ${USER_NL_DATM}
+  echo "CLMGSWP3v1.Precip:tintalgo = linear" >> ${USER_NL_DATM}
+  echo "CLMGSWP3v1.Precip:meshfile = ${MESH_FILE}" >> ${USER_NL_DATM}
   echo "${PRECIP_FILE}" | sed -e 's/$/ \\/' -e '$s/ \\$//' >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.TPQW:mapalgo = none"    >> ${USER_NL_DATM}
-  echo "CLMGSWP3v1.TPQW:meshfile = none"   >> ${USER_NL_DATM}
+#  echo "CLMGSWP3v1.Precip:datafiles = ${DATM_FILE}" >> ${USER_NL_DATM}                                                                                    
+  echo "CLMGSWP3v1.TPQW:mapalgo = nn"    >> ${USER_NL_DATM}
+  echo "CLMGSWP3v1.TPQW:tintalgo = linear" >> ${USER_NL_DATM}
+  echo "CLMGSWP3v1.TPQW:meshfile = ${MESH_FILE}"   >> ${USER_NL_DATM}
   echo "${TPQW_FILE}" | sed -e 's/$/ \\/' -e '$s/ \\$//'  >> ${USER_NL_DATM}
+#  echo "CLMGSWP3v1.TPQW:datafiles = ${DATM_FILE}" >> ${USER_NL_DATM}                                                                                     
    ;;
 esac
 #---~---
@@ -709,40 +715,40 @@ esac
 # available.  You should not need to change anything in here.
 #---~---
 # Find the first met driver.
-# case "${RESOL}" in
-# ?LM_USRDAT)
+ case "${RESOL}" in
+ ?LM_USRDAT)
    #--- Define files with meteorological driver settings.
-#   HLM_USRDAT_ORIG="${SIMUL_PATH}/run/datm.streams.txt.CLM1PT.${RESOL}"
-#   HLM_USRDAT_USER="${SIMUL_PATH}/user_datm.streams.txt.CLM1PT.${RESOL}"
+   HLM_USRDAT_ORIG="${SIMUL_PATH}/run/datm.streams.txt.CLM1PT.${RESOL}"
+   HLM_USRDAT_USER="${SIMUL_PATH}/user_datm.streams.txt.CLM1PT.${RESOL}"
    #---~---
    
 
-#   ANY_METD_NC=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | wc -l)
-#   if [[ ${ANY_METD_NC} ]]
-#   then
+   ANY_METD_NC=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | wc -l)
+   if [[ ${ANY_METD_NC} ]]
+   then
       #--- Load one netCDF file.
-#       METD_NC_1ST=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | head -1)
-#      ANY_FLDS=$(ncdump -h ${METD_NC_1ST} 2> /dev/null | grep FLDS | wc -l)
-#      if [[ ${ANY_FLDS} -eq 0 ]]
-#      then
+       METD_NC_1ST=$(/bin/ls -1 ${DATM_PATH}/????-??.nc 2> /dev/null | head -1)
+      ANY_FLDS=$(ncdump -h ${METD_NC_1ST} 2> /dev/null | grep FLDS | wc -l)
+      if [[ ${ANY_FLDS} -eq 0 ]]
+      then
          #--- Incoming long wave radiation is absent.  Modify the stream file
-#         /bin/cp ${HLM_USRDAT_ORIG} ${HLM_USRDAT_USER}
-#         $(sed -i '@FLDS@d' ${HLM_USRDAT_USER})
+         /bin/cp ${HLM_USRDAT_ORIG} ${HLM_USRDAT_USER}
+         $(sed -i '@FLDS@d' ${HLM_USRDAT_USER})
          #---~---
-#      fi
+      fi
       #---~---
-#   else
+   else
       #--- Report error.
-#      echo "FATAL ERROR!"
-#      echo " ANY_METD_NC = ${ANY_METD_NC}"
-#      echo " Meteorological drivers not found in ${DATM_PATH}".
-#      echo " Make sure all the met driver files are named as yyyy-mm.nc"
-#      exit 91
+      echo "FATAL ERROR!"
+      echo " ANY_METD_NC = ${ANY_METD_NC}"
+      echo " Meteorological drivers not found in ${DATM_PATH}".
+      echo " Make sure all the met driver files are named as yyyy-mm.nc"
+      exit 91
       #---~---
-#   fi
+   fi
    #---~---
-#   ;;
-#esac
+   ;;
+esac
 #---~---
 
 
