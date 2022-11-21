@@ -1,0 +1,2420 @@
+---
+title:  "CA-WRF-regional-runs"
+author: "Xiulin Gao"
+email:  "xiulingao@lbl.gov"
+date:   "10-Nov-2022"
+---
+## Introduction
+This script is used to process regional runs in California grasslands. 
+We want to benchmark model simulations of annual burned fraction, GPP, and LAI in annual grasslands. 
+This scripts uses a set of scripts developed by Marcos Longo at https://github.com/mpaiao/FATES_Utils;
+part of this script is also adapted from Marcos Longo's post-processing script, changes are
+made to do post-processing specifically for 1PFT regional simulations. 
+
+
+
+```{r, label = 'reset-R',message=FALSE, results='hide'}
+# Unload all packages except for the R default ones
+plist = names(sessionInfo()$otherPkgs)
+if (length(plist) > 0){
+   dummy = sapply(X=paste0("package:",plist),FUN=detach,character.only=TRUE,unload=TRUE)
+}#end if (length(plist) > 0)
+
+
+# Remove all variables
+rm(list=ls())
+
+# Reset warnings
+options(warn=0)
+
+# Close all plots
+invisible(graphics.off())
+
+# Clean up
+invisible(gc())
+```
+
+
+
+
+
+
+```{r, label="path"}
+home_path   = path.expand("~")
+local_path  = file.path(home_path,"Downloads/regional-runs")
+main_path   = file.path("~/Google Drive/My Drive/all")
+region_path = file.path(main_path,"regional-runs")
+util_path   = file.path(home_path,"Util/RUtils")
+
+
+cases       = c( "regional-low-genl-N05T08_CLM_FATES.clm2.nc"
+               , "regional-mean-brdi-N09T04_CLM_FATES.clm2.nc"
+               , "regional-median-genl-N12T18_CLM_FATES.clm2.nc"
+               , "regional-quant-genl-N08T27_CLM_FATES.clm2.nc"
+              )
+
+case_files   = file.path(local_path,cases)
+ncase        = length(cases)
+case_names   = c(1L,2L,3L,4L)
+
+case_desc    = c( "Low-GENL-G1-N05T08"
+               , "Mean-BRDI-G3-N09T04"
+               , "Median-GENL-G1-N1218"
+               , "Quant-GENL-G1-N08T27"
+               )
+
+names(case_desc) = c("1","2","3","4")
+
+#Observation path
+obs_main    = file.path("~/Google Drive/My Drive/CA-grassland-simulationDoc/benchmark")
+site_main   = file.path(obs_main,"Vaira-Ranch-AGB-LAI")
+pwood_main  = file.path(obs_main,"pepperwood-biomass-data")
+seablm_main = file.path(obs_main, "Seabloom-CA-grassland-productivity")
+frap_main   = file.path(obs_main,"FRAP")
+sif_main    = file.path(obs_main,"SIF-GPP-global0.05degree-monthly")
+lai_main    = file.path(obs_main,"LAI-monthly-pt05degree")
+site_base   = list.files(path=site_main,pattern="_eddy-summ\\.nc$"  )
+site_file   = file.path(site_main,site_base)
+site_agb    = file.path(site_main,list.files(path=site_main,pattern="biomass"))
+site_lai    = file.path(site_main,list.files(path=site_main,pattern="LAI\\.csv$"))
+agb_base    = list.files(path=pwood_main,pattern=".csv")
+#lai_base    = list.files(path=lai_main,pattern="LAI\\.csv$")
+agbS_path   = file.path(seablm_main,"nutnet-npp-div-data-output.csv")
+#flux_path   = file.path(sif_main,flux_base)
+agbP_path   = file.path(pwood_main,agb_base)
+#lai_path    = file.path(site_main,lai_base)
+frap_grass  = file.path(frap_main,"Bfrac-WRF-grassonly.csv")
+wrf_path    = file.path("~/Google Drive/My Drive/9km-WRF-1980-2020/1981-01.nc")
+
+```
+
+
+
+
+
+
+```{r,label="make-dir"}
+
+#plot path
+plot_main  = file.path(region_path,"Figures")
+# Output path for time series
+tsage_path    = file.path(plot_main,"tseries_age"         )
+tsdbh_path    = file.path(plot_main,"tseries_dbh"         )
+tspft_path    = file.path(plot_main,"tseries_pft"         )
+tsmort_path   = file.path(plot_main,"tseries_mort"        )
+tsnppo_path   = file.path(plot_main,"tseries_npp_organ"   )
+tsauto_path   = file.path(plot_main,"tseries_auto_resp"   )
+tsdap_path    = file.path(plot_main,"ts_heat_dbh+pft"     )
+tsdphen_path  = file.path(plot_main,"ts_drought_phenology")
+tssoil_path   = file.path(plot_main,"ts_heat_soil"        )
+tstheme_path  = file.path(plot_main,"tseries_theme"       )
+secy_path     = file.path(plot_main,"seasonal-cycle"      )
+sens_path     = file.path(plot_main,"variance-decomp"     )
+
+# Create paths for time series
+dummy = dir.create(tsage_path  , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsdbh_path  , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tspft_path  , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsmort_path , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsnppo_path , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsauto_path , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsdap_path  , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsdphen_path, recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tssoil_path , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tstheme_path, recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(secy_path   , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(sens_path   , recursive = TRUE, showWarnings = FALSE)
+
+```
+
+
+
+
+
+```{r,label="user-pft-fuel"}
+user_pftinfo  = TRUE
+user_fuelinfo = TRUE
+
+# List of PFTs, in case user_pftinfo is TRUE
+n            = 0
+pftinfo      = list()
+n            = n + 1
+pftinfo[[n]] = list( id     = 1
+                   , key    = "pft1"
+                   , short  = "Pooideae"
+                   , desc   = "C3 drought decid grass"
+                   , colour = "#00BFC4"
+                   , parse  ="D*e*c*i*d[Non-h*y*d*r*o]"
+                   )#end of PFT list
+
+
+# List of fuels, in case user_fuleinfo is TRUE
+n               = 0
+fuelinfo        = list()
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 1
+                      , key     = "fuel1"
+                      , short   = "Twig"
+                      , desc    = "Fuel from twig" 
+                      , colour  = "#E69F00"
+                      , parse   = "F*u*e*l[T*w*i*g]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 2
+                      , key     = "fuel2"
+                      , short   = "SBranch"
+                      , desc    = "Fuel from small branch" 
+                      , colour  = "#56B4E9"
+                      , parse   = "F*u*e*l[S*b*r*a*n*c*h]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 3
+                      , key     = "fuel3"
+                      , short   = "LBranch"
+                      , desc    = "Fuel from large branch" 
+                      , colour  = "#0072B2"
+                      , parse   = "F*u*e*l[L*b*r*a*n*c*h]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 4
+                      , key     = "fuel4"
+                      , short   = "Trunk"
+                      , desc    = "Fuel from trunk" 
+                      , colour  = "#D55E00"
+                      , parse   = "F*u*e*l[T*r*u*n*k]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 5
+                      , key     = "fuel5"
+                      , short   = "DeadLeaf"
+                      , desc    = "Fuel from dead leaf" 
+                      , colour  = "#999999"
+                      , parse   = "F*u*e*l[D*l*e*a*f]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 6
+                      , key     = "fuel6"
+                      , short   = "LiveGrass"
+                      , desc    = "Fuel from live grass" 
+                      , colour  = "#009E73"
+                      , parse   = "F*u*e*l[L*g*r*a*s*s]") #end of fuel list
+
+
+
+```
+
+
+
+
+
+
+```{r,label="plot-setting"}
+
+gg_device  = c("png")     # Output devices to use (Check ggsave for acceptable formats)
+gg_depth   = 600          # Plot resolution (dpi)
+gg_ptsz    = 18           # Font size
+gg_ptszl   = 26
+gg_width   = 17.5         # Plot width (units below)
+gg_widthn  = 14.5
+gg_height  = 8.5          # Plot height (units below)
+gg_units   = "in"         # Units for plot size
+gg_screen  = TRUE         # Show plots on screen as well?
+gg_tfmt    = "%y"         # Format for time strings in the time series %Y: 4 DIGITS YEAR %y 2 digits year
+gg_ncolours    = 129      # Number of node colours for heat maps.
+gg_fleg        = 1./6.    # Fraction of plotting area dedicated for legend
+gg_dstat_thick = 0.1      # Thickess for the drought-deciduous status band in the stress overview plot (Value
+
+#ens_colour  =  c("#E69F00", "#56B4E9", "#CC79A7",
+                #"#F0E442", "#0000FF", "#00B286")
+
+ens_colour = c("#A0AE6A", "#836B43", "#D68D18", "#437683", "#18B0D6")
+
+top12 <- c("#88CCEE", "#CC6677", "#DDCC77", "#117733", "#332288", "#AA4499", 
+           "#44AA99", "#999933", "#882255", "#6699CC", "#888888", "#661100")
+
+site_colour  = "#000000"
+
+ndevice = length(gg_device)
+
+
+# Define lower and upper bound for interannual variability ribbon around the mean.
+sdev_ribbon  = 1.                  # Standard-deviation equivalent for ribbon 
+qlwr_ribbon  = pnorm(-sdev_ribbon) # Lower quantile for ribbon
+qupr_ribbon  = pnorm(+sdev_ribbon) # Lower quantile for ribbon
+alpha_ribbon = 0.2
+
+```
+
+
+
+
+```{r, label="load-everything"}
+source(file.path(util_path,"load.everything.r"),chdir=TRUE)
+library(stars)
+
+```
+
+
+
+
+
+
+
+```{r,label="time-location-setting"}
+
+nc_conn      = nc_open(case_files[1])
+
+# longitude and latitude
+wrf         = nc_open(wrf_path)
+lon         = ncvar_get(wrf, "LONGXY")
+lat         = ncvar_get(wrf, "LATIXY")
+dummy       = nc_close(wrf)
+lon_vec     = as.vector(lon)
+lat_vec     = as.vector(lat)
+nlon        = length(lon_vec)
+nlat        = length(lat_vec)
+
+# time
+time_val     = ncvar_get(nc_conn,"time")
+time_use     = time_val[229:480] #only retrieve values for years during 2000-2020
+nstep        = length(time_use)
+simu_time    = c(2000:2020)
+model_yra    = 1981
+n_yr         = round((tail(time_use,1)-head(time_use,1))/365,digits=0)
+yr_start     = model_yra + floor(time_use[1]/365)
+yr_end       = yr_start + n_yr-1
+nc_year      = as.numeric(yr_start:yr_end)
+nc_month     = as.numeric(1:12)
+yr_ens       = rep(nc_year,each=nlon*12)
+month_yr     = rep(nc_month,each=nlon)
+month_ens    = rep(month_yr,times=n_yr)
+ens_tstamp   = make_datetime(year=yr_ens,month=month_ens,day=1L)
+ntstamp_ens = length(ens_tstamp)
+dummy        = nc_close(nc_conn)
+
+```
+
+
+
+
+
+```{r,label="dimension-setting"}
+if ("nc_conn" %in% ls()){dummy = nc_close(nc_conn); rm(nc_conn)}
+
+nc_dlist <- list()
+nc_vlist <- list()
+
+nc_conn  = nc_open(filename=case_files[1])
+nc_nvars = nc_conn$nvars
+nc_ndims = nc_conn$ndims
+nc_dlist = rep(NA_character_,times=nc_ndims)
+nc_vlist = rep(NA_character_,times=nc_nvars)
+for (d in sequence(nc_ndims)) nc_dlist[d] = nc_conn$dim[[d]]$name
+for (v in sequence(nc_nvars)) nc_vlist[v] = nc_conn$var[[v]]$name
+
+#---~---
+# Gather dimension information, then initialize matrices
+#---~---
+
+# List of age classes
+idxage   = match("fates_levage",nc_dlist)
+if (is.finite(idxage)){
+   ages     = nc_conn$dim[[idxage]]$vals
+   nages    = nc_conn$dim[[idxage]]$len
+
+   ageinfo  = tibble( id      = sequence(nages)
+                    , age_lwr = ages
+                    , age_upr = c(ages[-1],Inf)
+                    , key     = sprintf("age_%3.3i",ages)
+                    , desc    = c( paste0("paste(paste(",age_lwr[-nages],"<= A*g*e)<",age_upr[-nages],"*y*r)")
+                                 , paste0("paste( A*g*e >=",age_upr[nages],"*y*r)")
+                                 )#end c
+                    , labs    = c( paste0("paste(",age_lwr[-nages],"-",age_upr[-nages],")")
+                                 , paste0("paste(",age_lwr[ nages],"-infinity)")
+                                 )#end c
+                    , colour  = viridis(nages,option="D",direction=-1)
+                    )#end tibble
+}else{
+   ageinfo  = tibble( id      = integer(0L)
+                    , age_lwr = numeric(0L)
+                    , age_upr = numeric(0L)
+                    , key     = character(0L)
+                    , desc    = character(0L)
+                    , labs    = character(0L)
+                    , colour  = character(0L)
+                    )#end tibble
+}#end if (is.na(idxage))
+
+# Set number of age classes
+nages = nrow(ageinfo)
+
+
+# List of size classes
+idxdbh   = match("fates_levscls",nc_dlist)
+if (is.finite(idxdbh)){
+   dbhs     = nc_conn$dim[[idxdbh]]$vals
+   ndbhs    = nc_conn$dim[[idxdbh]]$len
+   dbhinfo  = tibble( id      = sequence(ndbhs)
+                    , dbh_lwr = dbhs
+                    , dbh_upr = c(dbh_lwr[-1],dbh_lwr[ndbhs]+2*max(diff(dbh_lwr)))
+                    , dbh     = 0.5 * (dbh_lwr + dbh_upr)
+                    , key     = sprintf("dbh_%3.3i",dbh_lwr)
+                    , desc    = c( paste0("paste(paste(",dbh_lwr[-ndbhs],"<=D*B*H)<",dbh_upr[-ndbhs],"*c*m)")
+                                 , paste0("paste( D*B*H >=",dbh_lwr[ndbhs],"*c*m)")
+                                 )#end c
+                    , labs    = c( paste0("paste(",dbh_lwr[-ndbhs],"-",dbh_upr[-ndbhs],")")
+                                 , paste0("paste(",dbh_lwr[ ndbhs],"-infinity)")
+                                 )#end dbhlabs
+                    , colour   = magma(ndbhs,direction=1)
+                    )#end tibble
+}else{
+   dbhinfo  = tibble( id      = integer(0L)
+                    , dbh_lwr = numeric(0L)
+                    , dbh_upr = numeric(0L)
+                    , key     = character(0L)
+                    , desc    = character(0L)
+                    , labs    = character(0L)
+                    , colour  = character(0L)
+                    )#end tibble
+}#end if (is.finite(idxdbh))
+
+# Set number of size classes
+ndbhs = nrow(dbhinfo)
+
+
+# List of PFT classes (only if not using user-defined classes).
+idxpft   = match("fates_levpft",nc_dlist)
+if (! is.finite(idxpft)){
+   # PFT index not found. Skip PFTs altogether.
+   pftinfo = tibble( id               = numeric(0L)
+                   , key              = character(0L)
+                   , short            = character(0L)
+                   , desc             = character(0L)
+                   , colour           = character(0L)
+                   , stringsAsFactors = FALSE
+                   )#end data.table
+}else if (! user_pftinfo){
+   # Select all PFTs available
+   pftids  = nc_conn$dim[[idxpft]]$vals
+   npftids = nc_conn$dim[[idxpft]]$len
+
+   # Build tibble with all the PFTs.
+   pftinfo = tibble( id               = pftids
+                   , key              = sprintf("pft%2.2i" ,pftids)
+                   , short            = sprintf("PFT%2.2i" ,pftids)
+                   , desc             = sprintf("PFT %2.2i",pftids)
+                   , colour           = brewer.pal(n=npftids,name="PuBuGn")
+                   , stringsAsFactors = FALSE
+                   )#end tibble
+}else if (! is_tibble(pftinfo)){
+   # Convert user-defined pftinfo to a "tibble" object
+   pftinfo  = do.call(what=rbind,args=lapply(X=pftinfo,FUN=as_tibble,stringsAsFactors=FALSE))
+}#end if (! is.finite(idxpft))
+
+# Set number of PFTs (active PFTs only) 
+npfts = nrow(pftinfo)
+
+# List of fuel classes
+
+idxfuel   = match("fates_levfuel",nc_dlist)
+if (! is.finite(idxfuel)){
+   # fuel index not found. Skip Fuels altogether.
+   fuelinfo = tibble( id               = numeric(0L)
+                    , key              = character(0L)
+                    , short            = character(0L)
+                    , desc             = character(0L)
+                    , colour           = character(0L)
+                    , stringsAsFactors = FALSE
+                    )#end data.table
+}else if (! user_fuelinfo){
+   # Select all fuels available
+   fuelids  = nc_conn$dim[[idxfuel]]$vals
+   nfuelids = nc_conn$dim[[idxfuel]]$len
+
+   # Build tibble with all the fuels.
+   fuelinfo = tibble( id               = fuelids
+                    , key              = sprintf("Fuel %2.2i" ,fuelids)
+                    , short            = sprintf("Fuel %2.2i" ,fuelids)
+                    , desc             = sprintf("Fuel %2.2i" ,fuelids)
+                    , colour           = brewer.pal(n=nfuelids,name="PuBuGn")
+                    , stringsAsFactors = FALSE
+                   )#end tibble
+}else if (! is_tibble(fuelinfo)){
+   # Convert user-defined fuelinfo to a "tibble" object
+   fuelinfo  = do.call(what=rbind,args=lapply(X=fuelinfo,FUN=as_tibble,stringsAsFactors=FALSE))
+}#end if (! is.finite(idxfuel))
+nfuels = nrow(fuelinfo)
+
+# List of soil layer
+idxsoi   = match("levgrnd",nc_dlist)
+if (is.finite(idxsoi)){
+   sois     = nc_conn$dim[[idxsoi]]$vals
+   nsois    = nc_conn$dim[[idxsoi]]$len
+   soikeys  = sprintf("sl_%3.3f",sois)
+   soilabs  = c( paste0("paste(",sois[-nsois],"-",sois[-1],")")
+               , paste0("paste(",sois[nsois],"-infinity)")
+               )#end dbhlabs
+   soilabs  = parse(text=soilabs)
+}else{
+   sois    = numeric(0L)
+   nsois   = 0L
+   soikeys = character(0L)
+   soilabs = character(0L)
+}#end if (is.finite(idxdbh))
+
+
+#---~---
+#retrieve age-class variables
+#---~---
+nc_byage = nc_vlist[grepl(pattern="_AP$",x=nc_vlist)]
+nc_pref  = tolower(gsub(pattern="_AP$",replacement="",x=nc_byage))
+nc_keep  = nc_pref %in% fatesvar$vnam & (! duplicated(nc_pref))
+no_byage = nc_byage[! nc_keep]
+nc_byage = nc_byage[  nc_keep]
+nbyage   = length(nc_byage)
+
+
+# by size class and whether total LAI can be calculated given canopy
+# and under-story LAI
+
+is_size   = grepl(pattern="_SZ$",x=nc_vlist) | grepl(pattern="_SZPF$",x=nc_vlist)
+nc_bydbh  = nc_vlist[is_size]
+nc_pref   = gsub(pattern="_SZ$",replacement="",x=nc_bydbh)
+nc_pref   = gsub(pattern="_SZPF$",replacement="",x=nc_pref )
+nc_pref   = tolower(nc_pref)
+nc_keep   = (nc_pref %in% fatesvar$vnam) & (! duplicated(nc_pref))
+no_bydbh  = nc_bydbh[! nc_keep]
+nc_bydbh  = unique(nc_bydbh[  nc_keep])
+
+vardbh_last = rep(x=FALSE,times=nfatesvar)
+for (v in which(fatesvar$is_upc)){
+   nc_vnow      = toupper(fatesvar$vnam[v])
+   nc_vnow_scls = paste0(nc_vnow,"_SZ")
+   nc_vund_scls = paste0(nc_vnow,"_USTORY_SZ")
+   nc_vcan_scls = paste0(nc_vnow,"_CANOPY_SZ")
+   nc_vnow_scpf = paste0(nc_vnow,"_SZPF")
+   nc_vund_scpf = paste0(nc_vnow,"_USTORY_SZPF")
+   nc_vcan_scpf = paste0(nc_vnow,"_CANOPY_SZPF")
+
+   # Check whether this variable can be derived from understorey+canopy (and needs to be).
+   if ( all(c(nc_vund_scls,nc_vcan_scls) %in% nc_bydbh ) && (! nc_vnow_scls %in% nc_bydbh) ){
+      nc_bydbh       = unique(c(nc_bydbh,nc_vnow_scls))
+      vardbh_last[v] = TRUE
+   }else if ( all(c(nc_vund_scpf,nc_vcan_scpf) %in% nc_bydbh ) && (! nc_vnow_scpf %in% nc_bydbh) ){
+      nc_bydbh       = unique(c(nc_bydbh,nc_vnow_scpf))
+      vardbh_last[v] = TRUE
+   }#end if ( all(c(nc_vund_scls,nc_vcan_scls) %in% nc_bydbh ) && (! nc_vnow_scls %in% nc_bydbh) )
+}#end for (v in which(fatesvar$is_upc))
+
+
+nbydbh    = length(nc_bydbh)
+n_vardbh_last = sum(vardbh_last)
+
+#by pft
+is_pft    = grepl(pattern="_SZPF$",x=nc_vlist) | grepl(pattern="_PF$",x=nc_vlist) | grepl(pattern="_$",x=nc_vlist) #for truncated hydro_cflux
+nc_bypft  = nc_vlist[is_pft]
+nc_pref   = gsub(pattern="_SZPF$",replacement="",x=nc_bypft )
+nc_pref   = gsub(pattern="_PF$",replacement="", x=nc_pref  )
+nc_pref   = gsub(pattern="_$",replacement="",x=nc_pref     )
+nc_pref   = tolower(nc_pref)
+nc_keep   = nc_pref %in% fatesvar$vnam & (! duplicated(nc_pref))
+no_bypft  = nc_bypft[! nc_keep]
+nc_bypft  = unique(nc_bypft[nc_keep])
+
+varpft_last = rep(x=FALSE,times=nfatesvar)
+for (v in which(fatesvar$is_upc)){
+   nc_vnow      = toupper(fatesvar$vnam[v])
+   nc_vnow_scpf = paste0(nc_vnow,"_SZPF")
+   nc_vund_scpf = paste0(nc_vnow,"_USTORY_SZPF")
+   nc_vcan_scpf = paste0(nc_vnow,"_CANOPY_SZPF")
+
+   # Check whether this variable can be derived from understorey+canopy (and needs to be).
+   if ( all( c(nc_vund_scpf,nc_vcan_scpf) %in% nc_bypft ) && (! nc_vnow_scpf %in% nc_bypft) ){
+      nc_bypft       = unique(c(nc_bypft,nc_vnow_scpf))
+      varpft_last[v] = TRUE
+   }#end if ( all(c(nc_vund_scls,nc_vcan_scls) %in% nc_bydbh ) && (! nc_vnow_scls %in% nc_bydbh) )
+}#end for (v in which(fatesvar$is_upc))
+
+nbypft    = length(nc_bypft)
+n_varpft_last = sum(varpft_last)
+
+# by fuel class
+nc_byfuel = nc_vlist[grepl(pattern="_FC$",x=nc_vlist)]
+nc_pref   = tolower(gsub(pattern="_FC$",replacement="",x=nc_byfuel))
+nc_keep   = nc_pref %in% fatesvar$vnam & (! duplicated(nc_pref))
+no_byfuel = nc_byfuel[! nc_keep]
+nc_byfuel = nc_byfuel[  nc_keep]
+nbyfuel   = length(nc_byfuel)
+
+#---~---
+#    Retrieve all "drought deciduous phenology variables
+#---~---
+nc_pref   = tolower(x=nc_vlist)
+nc_keep   = nc_pref %in% dphenvar$vorig
+no_dphen  = nc_vlist[! nc_keep]
+nc_dphen  = nc_vlist[  nc_keep]
+
+# Tally the total number of drought phenology variables.
+ndphen = length(nc_dphen)
+
+
+# all 1D and 2D variables variables
+nc_pref   = tolower(x=nc_vlist)
+nc1d_keep = nc_pref %in% hlm1dvar$vnam
+no_hlm1d  = nc_vlist[! nc1d_keep]
+nc_hlm1d  = nc_vlist[  nc1d_keep]
+nc2d_keep = nc_pref %in% hlm2dsoi$vnam
+no_hlm2d  = nc_vlist[! nc2d_keep]
+nc_hlm2d  = nc_vlist[  nc2d_keep]
+
+# Check whether to append "evapotranspiration"
+if (  ( all(c("QSOIL","QVEGT","QVEGE") %in% nc_hlm1d) ) && (! "QEVTR" %in% nc_hlm1d) ){
+   nc_hlm1d = unique(c(nc_hlm1d,"QEVTR"))
+   etr_last = TRUE
+}else{
+   etr_last = FALSE
+}#end if (  ( all(c("QSOIL","QVEGT","QVEGE") %in% nc_hlm1d) ) && (! "QEVTR" %in% nc_hlm1d) )
+
+# Check whether to append ecosystem respiration
+if (  ( all(c("FATES_AUTORESP","FATES_HET_RESP") %in% nc_hlm1d) ) && (! "ER" %in% nc_hlm1d) ){
+   nc_hlm1d = unique(c(nc_hlm1d,"ER"))
+   er_last  = TRUE
+}else{
+   er_last  = FALSE
+}#end if (  ( all(c("AR","HR") %in% nc_hlm1d) ) && (! "ER" %in% nc_hlm1d) )
+
+# Find number of host land model variables
+nhlm1d    = length(nc_hlm1d)
+nhlm2d    = length(nc_hlm2d)
+
+#---~---
+#Initialize variable matrix
+#---~---
+
+#by age class
+#byage = list()
+#for(c in sequence(ncase)){
+#  case     = as.character(case_names[c])
+  
+#  for(a in sequence(nbyage)){
+#  nc_nvnow                   = nc_byage[a]
+#  nc_pref                    = tolower(gsub(pattern="_AP$",replacement="",x=nc_nvnow))
+#  f                          = match(nc_pref,fatesvar$vnam)
+#  f_vnam                     = fatesvar$vnam[f]
+#  byage[[case]][[f_vnam]]    = matrix(data=NA_real_,nrow=ntstamp_ens,ncol=nages,dimnames=list(NULL,ageinfo$key)) 
+#  } #end of a loop
+#} #end of c(in sequence(ncase))
+
+
+# by size class
+#bydbh = list()
+#for(c in sequence(ncase)){
+#  case     = as.character(case_names[c])
+#  for(d in sequence(nbydbh)){
+#  nc_nvnow        = nc_bydbh[d]
+#  nc_pref         = gsub(pattern="_SZ$",replacement="",x=nc_nvnow)
+#  nc_pref         = gsub(pattern="_SZPF$",replacement="",x=nc_pref )
+#  nc_pref         = tolower(nc_pref)
+#  f               = match(nc_pref,fatesvar$vnam)
+#  f_vnam          = fatesvar$vnam[f]
+#  bydbh[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp_ens,ncol=ndbhs,dimnames=list(NULL,dbhinfo$key))
+#   } # end of d
+#}
+
+
+# by pft
+
+bypft = list()
+for(c in sequence(ncase)){
+  case     = as.character(case_names[c])
+  for(p in sequence(nbypft)){
+  nc_nvnow        = nc_bypft[p]
+  nc_pref         = gsub(pattern="_PF$",replacement="",x=nc_nvnow  )
+  nc_pref         = gsub(pattern="_SZPF$",replacement="",x=nc_pref )
+  nc_pref         = gsub(pattern="_$",replacement="",x=nc_pref )
+  nc_pref         = tolower(nc_pref)
+  f               = match(nc_pref,fatesvar$vnam)
+  f_vnam          = fatesvar$vnam[f]
+  bypft[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp_ens,ncol=npfts,
+                           dimnames=list(NULL,pftinfo$key)) 
+  } # end of p
+}
+
+# Initialize list of variables by fuel class
+
+byfuel = list()
+for(c in sequence(ncase)){
+  case     = as.character(case_names[c])
+  
+  for(f in sequence(nbyfuel)){
+  nc_nvnow                   = nc_byfuel[f]
+  nc_pref                    = tolower(gsub(pattern="_FC$",replacement="",x=nc_nvnow))
+  f                          = match(nc_pref,fatesvar$vnam)
+  f_vnam                     = fatesvar$vnam[f]
+  byfuel[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp_ens,ncol=nfuels,dimnames=list(NULL,fuelinfo$key)) 
+  } #end of a loop
+} #end of c(in sequence(ncase))
+
+
+# Initialise list of variables by soil layer
+dphen = list()
+for(c in sequence(ncase)){
+  case     = as.character(case_names[c])
+  for (p in sequence(ndphen)){
+   nc_nvnow        = nc_dphen[p]
+   nc_pref         = tolower(nc_nvnow)
+   f               = match(nc_pref,dphenvar$vorig)
+   f_vnam          = dphenvar$vnam[f]
+   dphen[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp_ens,
+                                    ncol=npfts,dimnames=list(NULL,pftinfo$key))
+  }#end for (p in sequence(ndphen))
+}
+
+
+
+# Initialize 1D variables available at the HLM
+hlm1d = as_tibble( matrix( data     = NA_real_
+                         , nrow     = ntstamp_ens*ncase
+                         , ncol     = nhlm1d+1
+                         , dimnames = list(NULL,tolower(c(nc_hlm1d,"CASE")))
+                         )
+                 )
+
+# Initialize soil water status related variables available at the HLM for each soil layer into hlm2dvar
+#hlm2d = list()
+#for(c in sequence(ncase)){
+#  case     = as.character(case_names[c])
+  
+#  for(m in sequence(nhlm2dsoi)){
+#  nc_nvnow        = nc_hlm2d[m]
+#  nc_pref         = tolower(nc_nvnow)
+#  h               = match(nc_pref,hlm2dsoi$vnam)
+#  h_vnam          = hlm2dsoi$vnam[h]
+#  hlm2d[[case]][[h_vnam]] = matrix(data=NA_real_,nrow=ntstamp_ens*ncase,ncol=nsois,dimnames=list(NULL,soikeys))
+#  }
+#}
+
+
+# Load soil layers
+# do a loop to avoid hard-coding here 
+#cat0("   - Load soil information")
+#slayer = tibble()
+
+#for (c in sequence(ncase)) {
+#case     = as.character(case_names[c])
+#slayer_now = tibble( zsoi   = c(unlist(ncvar_get(nc=nc_conn, varid='ZSOI',collapse_degen=TRUE))) 
+#                   , dzsoi  = c(unlist(ncvar_get(nc=nc_conn,varid='DZSOI',collapse_degen=TRUE ))) 
+#                   , bsw    = c(unlist(ncvar_get(nc=nc_conn,varid='BSW',collapse_degen=TRUE )))  
+#                   , hksat  = c(unlist(ncvar_get(nc=nc_conn,varid='HKSAT',collapse_degen=TRUE ))) 
+#                   , sucsat = c(unlist(ncvar_get(nc=nc_conn,varid='SUCSAT',collapse_degen=TRUE )))  
+#                   , watsat = c(unlist(ncvar_get(nc=nc_conn,varid='WATSAT',collapse_degen=TRUE )))  
+#                   , case   = c(rep_along(zsoi, case))
+#               )#end tibble
+#   slayer = rbind(slayer, slayer_now)
+#   rm(slayer_now)
+#}
+
+
+# Load indices
+scls   = ncvar_get(nc=nc_conn,varid='fates_scmap_levscpf')
+pft    = ncvar_get(nc=nc_conn,varid='fates_pftmap_levscpf')
+fuel   = ncvar_get(nc=nc_conn,varid='fates_levfuel')
+index_scpf = tibble( scls    
+                   , pft    
+                   )#end data.table;  
+rm(scls,pft)
+# Close connection
+dummy   = nc_close(nc_conn) 
+
+```
+
+
+
+
+
+
+```{r,label="retrieve-values",message=FALSE,results='hide'}
+if ("nc_conn" %in% ls()){dummy = nc_close(nc_conn); rm(nc_conn)}
+
+#for(n in sequence(ntstamp_each)){
+
+ # w_month      = month(each_tstamp[w])  
+ # w_year       = year(each_tstamp[w])
+  
+  # Find conversion factors for monthly variables.
+  
+   cmon.day = days_in_month(ens_tstamp)
+   cmon.hr  = day.hr  * cmon.day
+   cmon.min = day.min * cmon.day
+   cmon.sec = day.sec * cmon.day
+  
+
+# Open NetCDF connection and retrieve variable names
+for(c in sequence(ncase)){
+  case     = case_names[c]
+  nc_conn  = nc_open(case_files[c])
+  nc_nvars = nc_conn$nvars
+  nc_vlist = rep(NA_character_,times=nc_nvars)
+  for (v in sequence(nc_nvars)) nc_vlist[v] = nc_conn$var[[v]]$name
+
+
+# Read variables by age, and assign current values to the matrix.  
+#  for (a in sequence(nbyage)){
+#    nc_nvnow            = nc_byage[a]
+#    nc_pref             = tolower(gsub(pattern="_AP$",replacement="",x=nc_nvnow))
+#    f                   = match(nc_pref,fatesvar$vnam)
+#    f_vnam              = fatesvar$vnam[f]
+#    f_add0              = eval(parse(text=fatesvar$add0[f]))
+#    f_mult              = eval(parse(text=fatesvar$mult[f]))
+#    nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen = TRUE)
+   #subset time to only include results from 2000 to 2020
+#    nc_dat              = nc_dat[,,,229:480] 
+   #reform the 3d array so when convert to matrix, rows are time by ensemble members, columns are age class 
+#    ncm_dat             = aperm(nc_dat, c(2,3,4,1)) 
+#    dim(ncm_dat)        = c(ntstamp_ens,nages)
+#    nc_dat              = f_add0 + f_mult * ncm_dat
+#    byage[[case]][[f_vnam]][,]   = nc_dat
+#}#end for (a in sequence(nbyage))  
+
+#---~--- 
+   #   Read variables by size, and assign current values to the matrix.  In case LAI
+   # is in the list and it is the last variable, we calculate it from canopy and under
+   # story, after loading all variables
+   #---~---
+
+#for (d in sequence(nbydbh-n_vardbh_last)){
+#      nc_nvnow            = nc_bydbh[d]
+#      nc_pref             = gsub(pattern="_SZPF$",replacement="",x=nc_nvnow)
+#      nc_pref             = gsub(pattern="_SZ$",replacement="",x=nc_pref )
+#      nc_pref             = tolower(nc_pref)
+#      f                   = match(nc_pref,fatesvar$vnam)
+#      f_vnam              = fatesvar$vnam[f]
+#      f_add0              = eval(parse(text=fatesvar$add0[f]))
+#      f_mult              = eval(parse(text=fatesvar$mult[f]))
+#      f_aggr              = match.fun(fatesvar$aggr[f])
+#      nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
+#      nc_dat              = nc_dat[,,,229:480] 
+#      ncm_dat             = aperm(nc_dat,c(1,2,4,3))
+#      dim(ncm_dat)        = c(ntstamp_ens, ndbhs)
+#      nc_dat              = f_add0 + f_mult * ncm_dat
+#      bydbh[[case]][[f_vnam]][,]  = nc_dat #here we skip aggregating data for size class for by SZPF variable as we                                       #only have 1 PFT, so even SZPF is also a true size class variable
+#   }#end for (d in sequence(nbydbh-laidbh_last))
+
+#    Loop through variables to be added last
+#   for (v in which(vardbh_last)){
+      # Retrieve variable and build understory and canopy variables.
+#      v_vnam = fatesvar$vnam[v]
+#      v_vund = paste0(v_vnam,"_ustory")
+#      v_vcan = paste0(v_vnam,"_canopy")
+
+      # Aggregate data
+#      bydbh[[case]][[v_vnam]] = bydbh[[case]][[v_vund]] + bydbh[[case]][[v_vcan]]
+#   }#end for (v in which(vardbh_last))
+  
+ 
+
+#---~---
+# read variables by PFT
+#---~---
+  for (p in sequence(nbypft-n_varpft_last)){
+      # Load variable information
+      nc_nvnow = nc_bypft[p]
+      is_szpf  = grepl(pattern="_SZPF$",x=nc_nvnow)
+      nc_pref  = tolower(gsub(pattern="_SZPF$",replacement="",x=nc_nvnow))
+      nc_pref  = gsub(pattern="_PF$",replacement="",x=nc_pref )
+      nc_pref  = gsub(pattern="_$",replacement="",x=nc_pref )
+      f        = match(nc_pref,fatesvar$vnam)
+      f_vnam   = fatesvar$vnam[f]
+      f_add0   = eval(parse(text=fatesvar$add0[f]))
+      f_mult   = eval(parse(text=fatesvar$mult[f]))
+      nc_dat   = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen = TRUE)
+      nc_dat   = nc_dat[,,,229:480] 
+      if(is_szpf){
+      ncm_dat      = aperm(nc_dat,c(1,2,4,3))
+      dim(ncm_dat) = c(ntstamp_ens,ndbhs)
+      ncm_dat      = f_add0 + f_mult * ncm_dat
+      # Aggregate data across size classes
+      nc_aggr           = rowSums(ncm_dat, na.rm=TRUE)
+      bypft[[case]][[f_vnam]][] = nc_aggr
+      }else{
+      nc_dat  = as.vector(nc_dat)
+      nc_dat  = f_add0 + f_mult * nc_dat
+      nc_dat  = matrix(nc_dat,ncol=npfts)
+      bypft[[case]][[f_vnam]][] = nc_dat
+      }
+}#end for (p in sequence(nbypft-n_varpft_last))
+
+# Loop through variables to be added last
+  for (v in which(varpft_last)){
+      # Retrieve variable and build understory and canopy variables.
+    v_vnam = fatesvar$vnam[v]
+    v_vund = paste0(v_vnam,"_ustory")
+    v_vcan = paste0(v_vnam,"_canopy")
+
+  # Aggregate data
+   bypft[[case]][[v_vnam]] = bypft[[case]][[v_vund]] + bypft[[case]][[v_vcan]]
+   }#end for (v in which(varpft_last))
+  
+
+   # Read variables by fuel class, and assign current values to the matrix.  
+# for (f in sequence(nbyfuel)){
+#    nc_nvnow            = nc_byfuel[f]
+#    nc_pref             = tolower(gsub(pattern="_FC$",replacement="",x=nc_nvnow))
+#    f                   = match(nc_pref,fatesvar$vnam)
+#    f_vnam              = fatesvar$vnam[f]
+#    f_add0              = eval(parse(text=fatesvar$add0[f]))
+#    f_mult              = eval(parse(text=fatesvar$mult[f]))
+#    nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen = TRUE)
+   #subset time to only include results from 2000 to 2020
+#    nc_dat              = nc_dat[,,,229:480] 
+   #reform the 3d array so when convert to matrix, rows are time by ensemble members, columns are fuel class 
+#    ncm_dat             = aperm(nc_dat, c(1,2,4,3)) 
+#    dim(ncm_dat)        = c(ntstamp_ens, nfuels)
+#    ncm_dat              = f_add0 + f_mult * ncm_dat
+#    byfuel[[case]][[f_vnam]][,]   = ncm_dat
+#}#end for (f in sequence(nbyfuel))  
+
+
+ # Read drought-deciduous phenology variables (by PFT), and assign current values to the matrix.
+   # We use "rev" because the first soil layer is the deepest for the R output.
+#   for (p in sequence(ndphen)){
+#      nc_nvnow            = nc_dphen[p]
+#      nc_pref             = tolower(nc_nvnow)
+#      f                   = match(nc_pref,dphenvar$vorig)
+#      f_vnam              = dphenvar$vnam[f]
+#      f_add0              = eval(parse(text=dphenvar$add0[f]))
+#      f_mult              = eval(parse(text=dphenvar$mult[f]))
+#      nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen = TRUE)
+#      dphen[[case]][[f_vnam]][] = f_add0 + f_mult * rev(nc_dat)
+      #dphen[[case]][[f_vnam]][,] = f_add0 + f_mult * rev(nc_dat)
+#   }#end for (a in sequence(nbyage))
+
+
+# Read 1D variables
+ 
+  for (v in sequence(nhlm1d-etr_last-er_last)){
+  
+  nc_nvnow            = nc_hlm1d[v]
+  nc_pref             = tolower(x=nc_nvnow)
+  h                   = match(nc_pref,hlm1dvar$vnam)
+  h_vnam              = hlm1dvar$vnam[h]
+  h_add0              = eval(parse(text=hlm1dvar$add0[h]))
+  h_mult              = eval(parse(text=hlm1dvar$mult[h]))
+  nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen = TRUE)
+  nc_dat              = nc_dat[,,229:480] 
+  ncm_dat             = matrix(nc_dat, ncol=1)
+  
+  if (c==1){
+         hlm1d[[h_vnam]][1:ntstamp_ens]   = h_add0 + h_mult * ncm_dat
+         hlm1d$case[1:ntstamp_ens]        = case
+     }else{
+         start = (c-1)*ntstamp_ens+1
+         end   = c*ntstamp_ens
+         hlm1d[[h_vnam]][start:end] = h_add0 + h_mult * ncm_dat
+         hlm1d$case[start:end]      = case
+         }
+  
+}#for (h in sequence(nhlm1d-etr_last-et_last))
+  
+ # Find total ET.
+   if (etr_last){
+      if(c==1){
+         hlm1d$qevtr[1:ntstamp_ens] =  hlm1d$qvege[1:ntstamp_ens] + 
+                                       hlm1d$qvegt[1:ntstamp_ens] + 
+                                       hlm1d$qsoil[1:ntstamp_ens]
+      }else{
+         start = (c-1)*ntstamp_ens+1
+         end   = c*ntstamp_ens
+         hlm1d$qevtr[start:end] = hlm1d$qvege[start:end] + 
+                                  hlm1d$qvegt[start:end] + 
+                                  hlm1d$qsoil[start:end]
+      }
+   }#end if (etr_last)
+
+   # Find total ET.
+   if (er_last){
+      if(c==1){
+         hlm1d$er[1:ntstamp_ens] =  hlm1d$fates_autoresp[1:ntstamp_ens] + 
+                                    hlm1d$fates_het_resp[1:ntstamp_ens]
+      }else{
+         start = (c-1)*ntstamp_ens+1
+         end   = c*ntstamp_ens
+         hlm1d$er[start:end] = hlm1d$fates_autoresp[start:end] + 
+                               hlm1d$fates_het_resp[start:end] 
+               }
+   }#end if (er_last)
+
+
+# Read 2D variables
+#for (m in sequence(nhlm2d)){ 
+#  nc_nvnow            = nc_hlm2d[m]
+#  nc_pref             = tolower(x=nc_nvnow)
+#  h                   = match(nc_pref,hlm2dsoi$vnam)
+#  h_vnam              = hlm2dsoi$vnam[h]
+#  h_add0              = eval(parse(text=hlm2dsoi$add0[h]))
+#  h_mult              = eval(parse(text=hlm2dsoi$mult[h]))
+#  nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen = TRUE)
+#  nc_dat              = nc_dat[,181:432,] 
+#  ncm_dat             = aperm(nc_dat, c(2,3,1))
+#  dim(ncm_dat)        = c(ntstamp_each*ninst, nsois)
+#  nc_dat              = h_add0 + h_mult * ncm_dat
+#  hlm2d[[case]][[h_vnam]][,]  = nc_dat
+#}#end of for (m in sequence(nhlm2d))
+# Close connection
+dummy   = nc_close(nc_conn)
+
+  
+} #end of for (c in sequence(ncase))
+
+## add time for hlm1d
+hlm1d$time = rep(ens_tstamp,times=ncase)
+hlm1d$lon  = rep(lon_vec, times=nstep*ncase)
+hlm1d$lat  = rep(lat_vec, times=nstep*ncase)
+fwrite(hlm1d,file.path(region_path,paste0("region_hlm1d.csv")))
+
+```
+
+
+
+
+
+
+```{r,label="scale-age",message=FALSE,results='hide'}
+cat0(" + Rescale variables by age class.")
+
+for(c in sequence(ncase)){
+  case = case_names[c]
+  for (a in sequence(nbyage)){
+#--- Match variables
+  f        = match(names(byage[[case]])[a],fatesvar$vnam)
+  f_vnam   = fatesvar$vnam [f]
+  f_desc   = fatesvar$desc [f]
+  f_stack  = fatesvar$stack[f]
+   #---~---
+
+   #--- Proceed only if the variable is stacked and not the patch area.
+  if (f_stack && (! (f_vnam %in% "fates_patcharea"))){
+      cat0("   - ",f_desc,".")
+      byage[[case]][[f_vnam]] = byage[[case]][[f_vnam]] * byage[[case]]$fates_patcharea
+  }#end if (f_stack && (! (f_vnam %in% "patch_area")))
+}#end for (a in sequence(nbyage))
+  
+}
+
+
+
+```
+
+
+
+
+
+
+
+```{r,label="melt-data",message=FALSE,results='hide'}
+#cat0(" + Turn age-dependent matrices into tibble objects.")
+#age_melt  = NULL
+
+#for (c in sequence(ncase)){
+#  case = case_names[c]
+#  now_agemelt = NULL
+#  for (a in sequence(nbyage)){
+   #--- Match variables.
+#  f        = match(names(byage[[case]])[a],fatesvar$vnam)
+#  f_vnam   = fatesvar$vnam[f]
+#  f_desc   = fatesvar$desc[f]
+#  cat0("   - ",f_desc,".")
+      
+#--- Create molten data table for this variable.  
+#  now_age           = as_tibble(byage[[case]][[f_vnam]])
+#  now_age$time      = rep(each_tstamp, time=ninst)
+#  now_age$case      = rep_along(time, x = case)
+#  now_age$ens_label = rep(ens_labels, each = ntstamp_each)
+#  now_melt          = as_tibble(reshape2::melt(data=now_age,id.vars=c("case","ens_label",       
+#                              "time"),variable.name="age",value.name=f_vnam))
+      #--- Merge data table
+  
+#  if (is.null(now_agemelt)){
+#    now_agemelt = now_melt
+#  }else{
+#        now_agemelt = as_tibble(merge(x=now_agemelt,y=now_melt,by=c("case","ens_label","time","age"),all=TRUE))
+#  }#end if (is.null(age_melt))
+  
+#  }#end for (a in sequence(nbyage))
+#age_melt = rbind(age_melt,now_agemelt)
+#}
+
+
+
+#byage = age_melt 
+#rm(age_melt)
+#invisible(gc())
+
+#cat0(" + Turn size-dependent matrices into data tables.")
+#dbh_melt = NULL
+#for (c in sequence(ncase)){
+#  case = case_names[c]
+#for (d in sequence(nbydbh)){
+#  f        = match(names(bydbh[[case]])[d],fatesvar$vnam)
+#  f_vnam   = fatesvar$vnam[f]
+#  f_desc   = fatesvar$desc[f]
+#  cat0("   - ",f_desc,".")
+   
+#  now_dbh           = as_tibble(bydbh[[case]][[d]])
+#  now_dbh$time      = rep(each_tstamp, time=ninst)
+#  now_dbh$case      = rep_along(time, x = case)
+#  now_dbh$ens_label = rep(ens_labels, each = ntstamp_each)
+#  now_melt          = as_tibble(reshape2::melt(data=now_dbh,id.vars=c("case", "ens_label",  "time"),variable.name="dbh",value.name=f_vnam))
+  
+#  if (is.null(dbh_melt)){
+#      dbh_melt = now_melt
+#      }else{
+#         dbh_melt = merge(x=dbh_melt,y=now_melt,by=c("case", "ens_label","time","dbh"),all=TRUE)
+#      }#end if (is.null(scls.melt))
+#}#end for (d in sequence(nbydbh))
+
+#}
+
+#bydbh = dbh_melt
+#rm(dbh_melt)
+
+cat0(" + Turn PFT-dependent matrices into data tables.")
+pft_melt = NULL
+for (c in sequence(ncase)){
+  case = case_names[c]
+  now_pftmelt = NULL
+  for (p in sequence(nbypft)){
+   
+  f        = match(names(bypft[[case]])[p],fatesvar$vnam)
+  f_vnam   = fatesvar$vnam[f]
+  f_desc   = fatesvar$desc[f]
+  cat0("   - ",f_desc,".")
+  
+  now_pft           = as_tibble(bypft[[case]][[p]])
+  now_pft$lon       = rep(lon_vec,times=nstep)
+  now_pft$lat       = rep(lat_vec,times=nstep)
+  now_pft$time      = ens_tstamp
+  now_pft$case      = rep_along(time, x=case)
+  now_melt          = as_tibble(reshape2::melt(data=now_pft,id.vars=c("case","lon","lat","time"),variable.name="pft",value.name=f_vnam))
+
+  if (is.null(now_pftmelt)){
+      now_pftmelt = now_melt
+      }else{
+         now_pftmelt = as_tibble(merge(x=now_pftmelt,y=now_melt,by=c("case", "lon", "lat","time", "pft"),all=TRUE))
+      }
+}#end for (p in sequence(nbypft))
+  pft_melt = rbind(pft_melt,now_pftmelt)
+}
+
+
+bypft = pft_melt
+rm(pft_melt)
+invisible(gc())
+
+#cat0(" + Turn fuel-class matrices into tibble objects.")
+#fuel_melt  = NULL
+
+#for (c in sequence(ncase)){
+#  case = case_names[c]
+#  now_fuelmelt = NULL
+#  for (u in sequence(nbyfuel)){
+   #--- Match variables.
+#  f        = match(names(byfuel[[case]])[u],fatesvar$vnam)
+#  f_vnam   = fatesvar$vnam[f]
+#  f_desc   = fatesvar$desc[f]
+#  cat0("   - ",f_desc,".")
+      
+#--- Create molten data table for this variable.  
+#  now_fuel            = as_tibble(byfuel[[case]][[f_vnam]])
+#  now_fuel$lon        = rep(lon_vec,time=nstep)
+#  now_fuel$lat        = rep(lat_vec,time=nstep)
+#  now_fuel$time       = ens_tstamp
+#  now_fuel$case       = rep_along(time, x = case)
+#  now_melt            = as_tibble(reshape2::melt(data=now_fuel,id.vars=c("case","lon",       
+#                              "lat","time"),variable.name="fuel",value.name=f_vnam))
+      #--- Merge data table
+  
+#  if (is.null(now_fuelmelt)){
+#    now_fuelmelt = now_melt
+#  }else{
+#        now_fuelmelt = as_tibble(merge(x=now_fuelmelt,y=now_melt,by=c("case","lon","lat","time","fuel"),all=TRUE))
+#  }#end if (is.null(age_melt))
+  
+ # }#end for (a in sequence(nbyage))
+#fuel_melt = rbind(fuel_melt,now_fuelmelt)
+#}
+
+
+
+#byfuel = fuel_melt 
+#rm(fuel_melt)
+#invisible(gc())
+
+# Turn drought-deciduous phenology variables into data tables
+#if (! is_tibble(dphen)){
+#   cat0(" + Turn drought-deciduous phenology matrices into data tables.")
+#   dph_melt = NULL
+#   for (c in sequence(ncase)){
+#     case = case_names[c]
+#     now_dphmelt = NULL
+#     for (p in sequence(ndphen)){
+      # Match variables.
+#      f        = match(names(dphen[[case]])[p],dphenvar$vnam)
+#      f_vnam   = dphenvar$vnam[f]
+#      f_desc   = dphenvar$desc[f]
+#      cat0("   - ",f_desc,".")
+
+      # Create molten data table for this variable.  
+#      now_dph           = as_tibble(dphen[[case]][[p]])
+#      now_dph$lon       = lon_vec
+#      now_dph$lat       = lat_vec
+#      now_dph$time      = ens_tstamp
+#      now_dph$case      = rep_along(time, x=case)
+#      now_melt          = as_tibble(melt(data=now_dph,id.vars=c("case","lon","lat","time"),
+#                                    variable.name="pft",value.name=f_vnam))
+
+      # Merge data table
+#      if (is.null(now_dphmelt)){
+#         now_dphmelt = now_melt
+#      }else{
+#         now_dphmelt = as_tibble(merge(x=now_dphmelt,y=now_melt,by=c("case","lon","lat","time","pft"),all=TRUE))
+#      }#end if (is.null(dph_melt))
+#   }#end for (p in sequence(ndphen))
+#    dph_melt = rbind(dph_melt,now_dphmelt)
+#}# end of for (c insequence(ncase))
+   
+   # Replace dphen with the tibble object
+#   dphen = dph_melt
+#   rm(dph_melt)
+#   invisible(gc())
+#}#end if (! is_tibble(dphen))
+
+#cat0(" + Turn soil layer-dependent matrices into data tables.")
+#soi_melt = NULL
+#for (c in sequence(ncase)){
+#  case = case_names[c]
+#  now_soimelt = NULL
+#  for (s in sequence(nhlm2d)){
+#  h        = match(names(hlm2d[[case]])[s],hlm2dsoi$vnam)
+#  h_vnam   = hlm2dsoi$vnam[h]
+#  h_desc   = hlm2dsoi$desc[h]
+#  cat0("   - ",h_desc,".")
+   
+#  now_soi           = as_tibble(hlm2d[[case]][[s]])
+#  now_soi$lon       = lon_vec
+#  now_soi$lat       = lat_vec
+#  now_soi$time      = ens_tstamp
+#  now_soi$case      = rep_along(time, x=case)
+#  now_melt     = as_tibble(reshape2::melt(data=now_soi,id.vars=c("case", "lon",                 
+#                                             "lat","time"),variable.name="soi",value.name=h_vnam))
+#  if (is.null(now_soimelt)){
+#      now_soimelt = now_melt
+#      }else{
+#         now_soimelt = merge(x=now_soimelt,y=now_melt,by=c("case", "lon","lat","time","soi"),all=TRUE)
+#      }#end if (is.null(scls.melt))
+#  }#end for (s in sequence(nsoi))
+#  soi_melt = rbind(soi_melt,now_soimelt)
+  
+#}
+
+
+#bysoi = soi_melt
+#rm(soi_melt)
+#invisible(gc())
+
+
+cat0(" + Convert classes to integers.")
+#byage$age = as.integer(byage$age)
+#bydbh$dbh = as.integer(bydbh$dbh)
+bypft$pft   = as.integer(bypft$pft)
+#byfuel$fuel = as.integer(byfuel$fuel)
+#dphen$pft = as.integer(dphen$pft)
+#bysoi$soi = as.integer(bysoi$soi)
+
+## write out tables so can use later
+#fwrite(bypft,file.path(region_path,paste0("region_bypft.csv")))
+#fwrite(byfuel,file.path(region_path,paste0("region_byfuel.csv")))
+
+bypft  = fread(file.path(region_path,"region_bypft.csv"))
+hlm1d  = fread(file.path(region_path,"region_hlm1d.csv"))
+#byfuel = fread(file.path(region_path,"region_byfuel.csv"))
+
+```
+
+
+
+
+
+
+
+
+
+```{r,label="load-observations",message=FALSE,results='hide'}
+cat0(" + Load regional data from ",obs_main,".")
+
+
+## load FRAP regional burned fraction range
+
+cags_bf    = fread(frap_grass)       
+cags_bf    = cags_bf                       %>% 
+             filter(year %in% simu_time)   %>% 
+             mutate(bfrac=bfrac
+                   ,lon=round(lon,digits=5)
+                   ,lat=round(lat,digits=5)) 
+cags_bf$lon_f = factor(cags_bf$lon,levels=unique(cags_bf$lon))
+cags_bf$lat_f = factor(cags_bf$lat,levels=unique(cags_bf$lat))
+
+             
+cags_dmean = cags_bf                                   %>%
+             group_by(lon_f,lat_f)                     %>% 
+             mutate(bfrac=mean(bfrac,na.rm=TRUE))      %>% 
+             ungroup()                                  
+             
+
+cags_qupr  = cags_bf                                   %>% 
+             group_by(lon_f,lat_f)                     %>% 
+             summarize(bfrac_qupr=quantile(bfrac
+                                          ,probs=qupr_ribbon
+                                          ,na.rm=TRUE)) %>% 
+             ungroup()                                 
+
+cags_qlwr  = cags_bf                                   %>% 
+             group_by(lon_f,lat_f)                     %>% 
+             summarize(bfrac_qlwr=quantile(bfrac
+                                          ,probs=qlwr_ribbon
+                                          ,na.rm=TRUE)) %>% 
+             ungroup()
+
+cags_dmean = cags_dmean                                  %>% 
+             left_join(cags_qupr,by=c("lon_f","lat_f"))  %>% 
+             left_join(cags_qlwr,by=c("lon_f","lat_f"))  %>% 
+             dplyr::select(-c(lon_f,lat_f,year,mask))    %>% 
+             distinct()
+
+
+
+
+## range of annual burned fraction by each year using regional data         
+bf_quantyr = cags_bf                                 %>% 
+             group_by(year)                          %>%
+             summarize(yr_qupr = quantile(bfrac,probs=qupr_ribbon,na.rm=TRUE)
+                      ,yr_qlwr = quantile(bfrac,probs=qlwr_ribbon,na.rm=TRUE)
+                      ,yr_mean = mean(bfrac,na.rm=TRUE)) %>% 
+             ungroup()
+
+
+## load SIF re-sampled regional GPP
+
+
+
+
+## load MODIS re-sampled regional LAI 
+
+
+
+
+## join burned fraction, GPP, and LAI
+
+```
+
+
+
+
+
+
+```{r,label='load-biomass-data-nultiple-sites',message=FALSE,results='hide'}
+
+
+## load pepper wood preserve data
+agb = fread(agbP_path)
+agb = agb                                 %>% 
+      mutate(date       = ymd(date)
+            ,year       = year(date)
+            ,month      = month(date)
+            ,biomass    = biomass/2
+            ,biomass_sd = biomass_sd/2)   %>% 
+      dplyr::select(-date)                %>% 
+      group_by(year,month)                %>% 
+      summarise_all(mean,na.rm=TRUE)      %>% 
+      ungroup()
+
+## load seabloom et al. data
+seablm_data = fread(agbS_path)
+sierra_amean = seablm_data                                   %>% 
+              filter(site == "sier.us" & trt == "Control")   %>% 
+              mutate(live = (10^live_lg)*g2kg/2)             %>% 
+              group_by(year)                                 %>% 
+              summarize(agbs      = mean(live,na.rm=TRUE)
+                       ,agbs_qupr = quantile(live,probs=qupr_ribbon
+                                            ,na.rm=TRUE)
+                       ,agbs_qlwr = quantile(live,probs=qlwr_ribbon
+                                            ,na.rm=TRUE))
+
+## maybe instead comparing AGB we compare how AGB is related to precipitation and temperature? 
+              
+
+```
+
+
+
+
+
+
+
+```{r,label="fates-variable-mean",fig.height=50, fig.width=40,message=FALSE}
+
+mortout    = names(bypft)[grep(pattern="mortality",x=names(bypft))]
+find_mort = function(x,n){
+   mort_mon = ifelse( test = n == 0, yes = 0., no = pmin(1.,x/n/12.))
+   mort_year = 100. * (1. - (1. - mort_mon)^12)
+   return(mort_year)
+}#end function find_mort
+
+
+all    =     bypft                                            %>%  
+             mutate(month = month(time)
+                   ,year  = year(time))                       %>% 
+             mutate_at(all_of(mortout)
+                      ,~ find_mort(x=.x,n=.data$fates_nplant)) %>% 
+             mutate(lon = round(lon,5)
+                   ,lat = round(lat,5))
+  
+all$lon_f = factor(all$lon,levels=unique(all$lon))
+all$lat_f = factor(all$lat,levels=unique(all$lat))
+
+orig_xy   = hlm1d  %>% dplyr::select(lon,lat) %>% distinct() %>% 
+            mutate(lon=round(lon,5)
+                  ,lat=round(lat,5)
+                  ,lon_f = factor(lon,levels=unique(lon))
+                  ,lat_f = factor(lat,levels=unique(lat)))
+
+cell_mmean = all                                                     %>% 
+            group_by(case,lon_f,lat_f,pft,month)                     %>%  
+  summarize( fates_ddbh_canopy            = mean(fates_ddbh_canopy)
+           , fates_ddbh_ustory            = mean(fates_ddbh_ustory)
+           , fates_gpp                    = mean(fates_gpp)
+           , fates_lai_canopy             = mean(fates_lai_canopy)
+           , fates_lai_ustory             = mean(fates_lai_ustory)
+           , fates_mortality_background   = mean(fates_mortality_background)
+           , fates_mortality_cstarv       = mean(fates_mortality_cstarv)
+           , fates_mortality_hydraulic    = mean(fates_mortality_hydraulic)
+           , fates_mortality_termination  = mean(fates_mortality_termination)
+           , fates_mortality_canopy       = mean(fates_mortality_canopy)
+           , fates_mortality_ustory       = mean(fates_mortality_ustory)
+           , fates_npp                    = mean(fates_npp)
+           , fates_vegc_aboveground       = mean(fates_vegc_aboveground)
+           , fates_lai                    = mean(fates_lai))  %>% 
+  ungroup()                                                                   
+
+cell_mmean = orig_xy %>% left_join(cell_mmean,by=c("lon_f","lat_f")) 
+
+
+ cell_amean = all                                                        %>% 
+              group_by(case,lon_f,lat_f,pft,year)                        %>% 
+              summarize(fates_ddbh_canopy           = mean(fates_ddbh_canopy)
+                       ,fates_ddbh_ustory           = mean(fates_ddbh_ustory)
+                       ,fates_gpp                   = mean(fates_gpp)
+                       ,fates_lai_canopy            = mean(fates_lai_canopy)
+                       ,fates_lai_ustory            = mean(fates_lai_ustory)
+                       ,fates_vegc_aboveground      = mean(fates_vegc_aboveground)
+                       ,fates_lai                   = mean(fates_lai))   %>%
+               ungroup()                                                 
+ cell_amean = orig_xy %>% left_join(cell_amean,by=c("lon_f","lat_f"))
+ 
+ 
+ cell_mean  = all                                                         %>% 
+              group_by(case,lon_f,lat_f,pft)                              %>% 
+              summarize(fates_gpp                   = mean(fates_gpp)
+                       ,fates_lai_canopy            = mean(fates_lai_canopy)
+                       ,fates_lai_ustory            = mean(fates_lai_ustory)
+                       ,fates_vegc_aboveground      = mean(fates_vegc_aboveground)
+                       ,fates_lai                   = mean(fates_lai))   %>%
+               ungroup()                                                 
+ cell_mean   = orig_xy  %>% left_join(cell_mean,by=c("lon_f","lat_f"))
+              
+
+
+
+  
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r,label="hlm-variable-mean",results='hide'}
+
+hlm_var   = c("fates_gpp","fates_vegc_aboveground",
+              "eflx_lh_tot","elai","fsh")
+fire_month = c("6","7","8","9","10")
+growing_sea   = c("3","4","5")
+
+hlm1d$lon_f = factor(hlm1d$lon,levels=unique(hlm1d$lon))
+hlm1d$lat_f = factor(hlm1d$lat,levels=unique(hlm1d$lat))
+
+bf_mod   =  hlm1d                                                                  %>% 
+            dplyr::select(all_of(c("case","time","lon","lat",
+                                   "lon_f","lat_f","fates_burnfrac")))             %>% 
+            mutate(month=month(time))                                              %>% 
+            filter(month %in% fire_month)                                          %>% 
+            dplyr::select(-month)
+
+
+hlm_scy    = hlm1d                                                                %>% 
+             dplyr::select(all_of(c("case","time","lon","lat",
+                                    "lon_f","lat_f", hlm_var)))                   %>% 
+             mutate(month=month(time))                                            %>% 
+             filter(month%in%growing_sea)                                         %>% 
+             dplyr::select(-month)
+
+
+
+mean_bf =   bf_mod                                     %>%
+            group_by(case,lon_f,lat_f)                 %>%
+            dplyr::select(-time)                       %>%
+            mutate(fates_burnfrac=mean(fates_burnfrac)
+                  )                                    %>% 
+            ungroup()                                  %>% 
+            dplyr::select(-c(lon_f,lat_f))             %>% 
+            distinct()
+mean_bfall = hlm1d                                       %>% 
+             group_by(case,lon_f,lat_f)                  %>% 
+             mutate(fates_burnfrac=mean(fates_burnfrac)) %>% 
+             ungroup()                                   %>% 
+             dplyr::select(case,lon,lat,fates_burnfrac)  %>% 
+             distinct()                               
+
+sum_bfall  = hlm1d                                     %>% 
+             group_by(case,lon_f,lat_f)                %>% 
+             mutate(bfrac=sum(fates_burnfrac))         %>% 
+             ungroup()                                 %>% 
+             dplyr::select(case,lon,lat,bfrac)         %>% 
+             distinct()                                %>% 
+             mutate(bfrac=bfrac*yr.day) 
+
+
+mean_hlm   = hlm_scy                          %>% 
+             group_by(case,lon_f,lat_f)       %>% 
+             dplyr::select(-time)             %>% 
+             mutate(fates_gpp     = mean(fates_gpp)
+                   ,fates_vegc_aboveground = mean(fates_vegc_aboveground)
+                   ,eflx_lh_tot = mean(eflx_lh_tot)
+                   ,elai = mean(elai)
+                   ,fsh = mean(fsh))          %>% 
+             distinct()
+
+allmean_hlm = hlm1d                                      %>% 
+              dplyr::select(all_of(c("case","lon","lat",
+                          "lon_f","lat_f",hlm_var)))     %>% 
+              group_by(case,lon_f,lat_f)                 %>% 
+              mutate(fates_gpp     = mean(fates_gpp)
+                   ,fates_vegc_aboveground = mean(fates_vegc_aboveground)
+                   ,eflx_lh_tot = mean(eflx_lh_tot)
+                   ,elai = mean(elai)
+                   ,fsh = mean(fsh))                     %>% 
+               distinct()
+
+
+## mean of each variable from either peak growing season or fire season
+mean_pseason = mean_hlm %>% left_join(mean_bf,by=c("case","lon","lat")) %>% ungroup()
+
+## mean of each variable from all months
+mean_allseson = allmean_hlm  %>% left_join(mean_bfall,by=c("case","lon","lat")) %>% ungroup()
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r,label="plot-HLM-mean"}
+cat0(" + Plot  mean of HLM variables.")
+
+#leg_colours = c(site_colour,ens_colour)
+#leg_labels  = c("Site",case_desc)
+ca_co    = USAboundaries::us_counties(resolution = "high", states = "CA")
+wgs = "+init=EPSG:4326"
+emean_loop = which(hlm1dvar$vnam %in% c(hlm_var,"fates_burnfrac"))
+
+
+gg_emean   = list()
+for(c in sequence(ncase)){
+  case_now = case_names[c]
+  desc_now = case_desc[c]
+mmean_now        = mean_allseson %>% filter(case == case_now) 
+for (h in emean_loop){
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   h_vqlwr  = paste0(h_vnam,"_qlwr")
+   h_vqupr  = paste0(h_vnam,"_qupr")
+   h_legend =  1
+   cat0("   - ",h_desc,".")
+   var_df   = mmean_now %>% dplyr::select(all_of(c("lon","lat",h_vnam)))
+   
+   
+   fil_var  = matrix(var_df[[h_vnam]], nrow=147,ncol=151)
+   x_arr    = matrix(var_df$lon,nrow=147,ncol=151)
+   y_arr    = matrix(var_df$lat,nrow=147,ncol=151)
+   wrf_star = st_as_stars(fil_var)
+   wrf_star = st_as_stars(wrf_star, curvilinear=list(X1=x_arr,X2=y_arr), crs=wgs)
+   wrf_sf   = st_as_sf(wrf_star,as_points=FALSE,na.rm=FALSE)
+   
+   gg_now = ggplot()
+   gg_now = gg_now + geom_sf(data=wrf_sf,aes(fill=A1),color=NA)
+   gg_now = gg_now + coord_sf(crs=st_crs(wgs)) 
+   gg_now = gg_now + scale_fill_continuous(low="blue", high="red", guide="colorbar",na.value="white")
+   gg_now = gg_now + geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) 
+   gg_now = gg_now + labs(title=desc_now
+                         , x="Longitude"
+                         , y="Latitude"
+                         , fill=desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "right" 
+                          , panel.background  = element_blank()
+                          , panel.border      = element_rect(linewidth = 1.6, fill=NA)
+                          , axis.text.x       = element_text( size   = gg_ptsz-5
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                          , axis.text.y       = element_text( size   = gg_ptsz-5
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                          , axis.ticks.length = unit(-0.25,"cm")
+                         ) #end theme
+  
+ 
+   # Save plots.
+   for (d in sequence(ndevice)){
+    h_output = paste0(case_now,h_vnam,"allmean.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot     = gg_now
+                    , device   = gg_device[d]
+                    , path     = secy_path
+                    , width    = gg_widthn*0.6
+                    , height   = gg_height*0.6
+                    , units    = gg_units
+                    , dpi      = gg_depth
+                    )
+   }
+  gg_emean[[h_vnam]] = gg_now      
+
+}
+}
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_emean
+
+```
+
+
+
+
+
+
+
+```{r,label="relative-bf"}
+
+bf_simu = mean_hlm %>% dplyr::select(case,lon,lat,fates_burnfrac) %>% 
+          mutate(lon=round(lon,digits=5)
+                ,lat=round(lat,digits=5))     
+bfsum_simu = sum_bfall %>% dplyr::select(case,lon,lat,bfrac) %>% 
+             mutate(lon=round(lon,digits=5)
+                   ,lat=round(lat,digits=5))
+
+bfsum_ob   = cags_bf %>% group_by(lon_f,lat_f)   %>% 
+             mutate(bfrac_ob=sum(bfrac,na.rm=TRUE)) %>% 
+             ungroup()                           %>% 
+             dplyr::select(lon,lat,bfrac_ob)     %>% 
+             distinct()                          %>% 
+             mutate(bfrac_ob=bfrac_ob*yr.day)
+
+bf_comm = bf_simu  %>% left_join(cags_dmean,by=c("lon","lat")) %>% 
+          mutate(rela_bf = fates_burnfrac/bfrac)               %>% 
+          mutate(rela_bf = ifelse(is.infinite(rela_bf),NA,rela_bf))
+
+bfall_comm = bfsum_simu %>% left_join(bfsum_ob,by=c("lon","lat"))
+ 
+for(n in sequence(ncase)){
+  case_now = case_names[n]
+  bf_now = bf_comm %>% filter(case==case_now)
+ # bf_noext = bf_comm %>% mutate(rela_bf=ifelse(rela_bf>100 | rela_bf<0.01,NA,rela_bf))
+
+
+ fil_var  = matrix(bf_now$rela_bf, nrow=147,ncol=151)
+ x_arr    = matrix(bf_now$lon,nrow=147,ncol=151)
+ y_arr    = matrix(bf_now$lat,nrow=147,ncol=151)
+ wrf_star = st_as_stars(fil_var)
+ wrf_star = st_as_stars(wrf_star, curvilinear=list(X1=x_arr,X2=y_arr), crs=wgs)
+ wrf_sf   = st_as_sf(wrf_star,as_points=FALSE,na.rm=FALSE)
+ ca_co    = USAboundaries::us_counties(resolution = "high", states = "CA")
+
+
+ p = ggplot() + geom_sf(data=wrf_sf,colour="grey50", aes(fill=A1),lwd=0)+
+  coord_sf(crs=st_crs(wgs)) + 
+  scale_fill_continuous(low="blue", high="red", 
+                                  guide="colorbar",na.value="white")+
+  geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
+  labs(x="",y="") +
+  guides(fill=guide_legend(title="Relative burned fraction")) +
+  theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+  theme( legend.position   = "right" 
+       , panel.background = element_rect(size = 1.6, fill = NA)
+       , panel.border = element_rect(size = 1.6, fill=NA)
+       , axis.text.x   = element_text( size   = gg_ptsz
+       , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+       , axis.text.y       = element_text( size   = gg_ptsz
+       , margin = unit(rep(0.35,times=4),"cm")
+      )#end element_text
+      , axis.ticks.length = unit(-0.25,"cm")
+      ) #end theme
+   p
+   fname = paste0(case_now,"-relativeBF.png")
+   ggsave(p, filename=fname,path=secy_path,width=gg_widthn,height=gg_height,dpi=gg_depth,device=gg_device[1])
+}
+
+## seems case 1 is the best given relative BF
+both    = bf_comm %>% filter(case==3) %>% mutate(diff = (fates_burnfrac-bfrac)/bfrac)
+both_nox= both    %>% mutate(rela_bf=ifelse(rela_bf>100 | rela_bf< 0.01,NA,rela_bf))
+frap    = bf_comm %>% filter(case==3) %>% dplyr::select(lon,lat,bfrac) %>% mutate(bfrac = bfrac*yr.day)
+model   = bf_comm %>% filter(case==3) %>% dplyr::select(lon,lat,fates_burnfrac) %>% mutate(bfrac = fates_burnfrac*yr.day)
+
+ model_var  = matrix(model$bfrac, nrow=147,ncol=151) 
+ x_arr    = matrix(model$lon,nrow=147,ncol=151)
+ y_arr    = matrix(model$lat,nrow=147,ncol=151)
+ model    = st_as_stars(model_var)
+ model    = st_as_stars(model, curvilinear=list(X1=x_arr,X2=y_arr), crs=wgs)
+ model_sf   = st_as_sf(model,as_points=FALSE,na.rm=FALSE)
+ ca_co    = USAboundaries::us_counties(resolution = "high", states = "CA")
+
+par(mar=c(0,0,0,0))
+p1 = ggplot() + geom_sf(data=model_sf,colour="grey50", aes(fill=A1),lwd=0)+
+  scale_fill_continuous(low="blue", high="red", 
+                        guide="colorbar",na.value="white")+
+  geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
+  labs(x="",y="",title=expression("FATES burned fraction"~"("*year^-1*")")) +
+  guides(fill=guide_legend(title="")) +
+  theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+  theme( 
+        legend.position   = "bottom" 
+       , panel.background = element_rect(fill=NA)
+       , panel.border = element_rect(fill=NA)
+       , axis.text.x   = element_text( size   = gg_ptsz-5
+       , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+       , axis.text.y       = element_text( size   = gg_ptsz-5
+       , margin = unit(rep(0.35,times=4),"cm")
+      )#end element_text
+      , axis.ticks.length = unit(-0.25,"cm")
+      ) #end theme
+ p1 
+fname="medianBF-bf.png"
+ggsave(p1, filename=fname,path=secy_path,width=gg_widthn*0.6,height=gg_height*0.6,dpi=gg_depth,device=gg_device[1])
+
+par(mar=c(0,0,0,0))
+p2=ggplot() + geom_sf(data=model_sf,colour="grey50", aes(fill=A1),lwd=0)+
+  scale_fill_continuous(low="blue", high="red", 
+                        guide="colorbar",na.value="white")+
+  geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
+  labs(x="",y="")  +
+  guides(fill=guide_legend(title="")) +
+  theme_grey( base_size = gg_ptsz-10, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+  theme( legend.position   = c(0.6,0.7)
+       , legend.key.size = unit(0.1, "cm")
+       , panel.background = element_blank()
+       , panel.border = element_blank()
+       , axis.line=element_blank(),axis.text.x=element_blank()
+       , axis.text.y=element_blank(),axis.ticks=element_blank()
+       , axis.title.x=element_blank()
+       , axis.title.y=element_blank()
+      ) #end theme
+   p2
+   fname="FATES-2000-2020SUM.png"
+ ggsave(p2, filename=fname,path=secy_path,width=gg_widthn*0.4,height=gg_height*0.4,dpi=gg_depth,device=gg_device[1])
+## FRAP BF plot
+ 
+ fil_var  = matrix(both_nox$bfrac, nrow=147,ncol=151)
+ x_arr    = matrix(both_nox$lon,nrow=147,ncol=151)
+ y_arr    = matrix(both_nox$lat,nrow=147,ncol=151)
+ wrf_star = st_as_stars(fil_var)
+ wrf_star = st_as_stars(wrf_star, curvilinear=list(X1=x_arr,X2=y_arr), crs=wgs)
+ wrf_sf   = st_as_sf(wrf_star,as_points=FALSE,na.rm=FALSE)
+ 
+par(mar=c(0,4,4,4))
+ p3=ggplot() + geom_sf(data=wrf_sf,colour="grey50", aes(fill=A1),lwd=0)+
+  scale_fill_continuous(low="blue", high="red", 
+                        guide="colorbar",na.value="white")+
+  geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
+  labs(x="",y="")  +
+  guides(fill=guide_legend(title="")) +
+  theme_grey( base_size = gg_ptsz-10, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+  theme( legend.position   = c(0.6,0.7)
+       , legend.key.size = unit(0.1, "cm")
+       , panel.background = element_blank()
+       , panel.border = element_blank()
+       , axis.line=element_blank(),axis.text.x=element_blank()
+       , axis.text.y=element_blank(),axis.ticks=element_blank()
+       , axis.title.x=element_blank()
+       , axis.title.y=element_blank()
+      ) #end theme
+   
+ p3
+
+   p = p2 + p3 + guide_area() + plot_layout(ncol=2,widths = c(4, -1,4))                                               
+  
+p
+   fname = "frap_2000-2020sum.png"
+   ggsave(p3, filename=fname,path=secy_path,width=gg_widthn*0.4,height=gg_height*0.4,dpi=gg_depth,device=gg_device[1])
+
+### annual total burned fraction compare to FRAP
+mo_amean =  hlm_scy                                                        %>%
+            mutate(year=year(time))                                        %>%
+            group_by(case,year)                                            %>%
+            summarize(bf_amean=sum(fates_burnfrac,na.rm=TRUE))             %>% 
+            ungroup()                                                      %>% 
+            mutate(bf_amean = bf_amean*yr.day)                             %>% 
+            filter(case==3)                                                %>% 
+            mutate(case="FATES")
+mo_allamean = hlm1d                                                        %>% 
+              mutate(year=year(time))                                      %>% 
+              group_by(case,year)                                          %>% 
+              summarize(bf_amean=sum(fates_burnfrac,na.rm=TRUE))           %>% 
+              mutate(bf_amean = bf_amean*yr.day)                           %>%
+              ungroup()                                                    %>% 
+              mutate(case=case_desc[case])
+ob_amean = cags_bf                                                         %>% 
+           group_by(year)                                                  %>% 
+           summarize(bf_amean=sum(bfrac,na.rm=TRUE))                       %>% 
+           mutate(bf_amean=bf_amean*yr.day
+                 ,case="FRAP")
+
+amean_comm = rbind(mo_allamean,ob_amean)
+#amean_comm$case=factor(amean_comm$case,levels=unique(amean_comm$case))
+p = ggplot(amean_comm,aes(year,bf_amean,colour=case)) + geom_line() +
+scale_color_manual(name="",values=ens_colour) +
+  labs(x="",y="Summed burned fraction")+
+  theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+  theme( legend.position   = "right" 
+       , legend.text = element_text(size=gg_ptsz-5)
+       , panel.background = element_rect(size = 1.6, fill = NA)
+       , panel.border = element_rect(size = 1.6, fill=NA)
+       , axis.text.x   = element_text( size   = gg_ptsz
+       , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+       , axis.text.y       = element_text( size   = gg_ptsz
+       , margin = unit(rep(0.35,times=4),"cm")
+      )#end element_text
+      , axis.ticks.length = unit(-0.25,"cm")
+      ) #end theme
+out_name = "summed-BF-all.png"
+ggsave(p, filename=out_name,path=secy_path,width=gg_widthn*0.6,height=gg_height*0.6,dpi=gg_depth,device=gg_device[1])
+
+```
+
+
+
+
+
+
+```{r,label="plot-mean-fire-variables"}
+
+fire_vars = c("fates_burnfrac","fates_fdi","fates_ros",
+              "fates_fuel_amount","fates_fuel_bulkd")
+
+fire_mmean = hlm1d                                                 %>% 
+             select(all_of(c("case","ens_label","time",fire_vars)))%>% 
+             mutate(case_ens = paste0(case,"_",ens_label)
+                   , month = month(time))                          %>% 
+             group_by(case,ens_label,case_ens,month)               %>% 
+             dplyr::select(-time)                                  %>% 
+             summarize_all(mean,na.rm=TRUE)                        %>% 
+             ungroup()
+
+fuelmmean_bysize = byfuel                                          %>% 
+              mutate(case_ens = paste0(case,"_",ens_label)
+                   , month = month(time))                          %>% 
+              group_by(case,month,fuel)                            %>% 
+              dplyr::select(-c(time,ens_label,case_ens))           %>% 
+              summarize_all(mean,na.rm=TRUE)                       %>% 
+              ungroup()
+
+sumfuel          = byfuel                                          %>%
+                   group_by(case,ens_label,time)                   %>% 
+                   dplyr::select(-fuel)                            %>% 
+                   summarize_all(sum,na.rm=TRUE)                   %>% 
+                   ungroup()                                       %>% 
+                   mutate(month = month(time))                     %>% 
+                   group_by(case,ens_label,month)                  %>% 
+                   dplyr::select(-time)                            %>% 
+                   summarize_all(mean,na.rm=TRUE)                  %>% 
+                   ungroup()                                       %>% 
+                   rename("fueload_byclass" = "fates_fuel_amount")
+
+sumfuel          = sumfuel %>% left_join(fire_mmean,by=c("case","ens_label","month"))
+
+fuel_plot = ggplot(sumfuel, aes(x=fueload_byclass,y=fates_fuel_amount,group=ens_label)) + geom_line(lwd=0.01) + facet_wrap(.~case,labeller=labeller(case=case_desc)) 
+ggsave(fuel_plot,path=plot_main,filename="fueload-examine.jpeg",width=gg_width,height=gg_height,dpi=gg_depth)  
+             
+  
+fire_loop = which(hlm1dvar$vnam %in% fire_vars)
+gg_fire   = list()
+for(h in fire_loop){
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+
+  fire_now        = fire_mmean
+   #mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
+   
+   gg_now = ggplot(data=fire_now)
+   gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))
+   gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,group="ens_label",color="'Model'")
+                              ,lwd=0.1,alpha=0.8,show.legend=TRUE)
+   
+   gg_now = gg_now + scale_colour_manual(name=""
+                                        ,values=c("Model"= ens_colour[1]))
+   gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "right"
+                         , legend.text=element_text(size=gg_ptsz)
+                         , axis.text.x        = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         ) #end theme
+  
+ 
+   # Save plots.
+   for (d in sequence(ndevice)){
+    h_output = paste0(h_vnam,"_monthlymean.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot      = gg_now
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_width
+                    , height    = gg_height
+                    , units     = gg_units
+                    , dpi       = gg_depth
+                    )
+   }
+  gg_fire[[h_vnam]] = gg_now      
+
+}
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_fire
+
+
+```
+
+
+
+
+
+```{r,label='load-site-data'}
+if ("nc_site" %in% ls()){dummy = nc_close(nc_site); rm(nc_site)}
+
+# TO-DO: loop for reading multiple site data
+# Open NetCDF connection and retrieve variable names
+cat0(" + Load site data from ",site_base,".")
+nc_site  = nc_open(filename=site_file)
+nc_nvars = nc_site$nvars
+nc_ndims = nc_site$ndims
+nc_dlist = rep(NA_character_,times=nc_ndims)
+nc_vlist = rep(NA_character_,times=nc_nvars)
+for (d in sequence(nc_ndims)) nc_dlist[d] = nc_site$dim[[d]]$name
+for (v in sequence(nc_nvars)) nc_vlist[v] = nc_site$var[[v]]$name
+
+# Select variables to load
+nc_obs1d    = nc_vlist[tolower(nc_vlist) %in% hlm1dvar$vnam[hlm1dvar$assess]]
+nc_obs2d    = nc_vlist[tolower(nc_vlist) %in% hlm2dsoi$vnam[hlm2dsoi$assess]]
+nc_obs      = c(nc_obs1d, nc_obs2d)
+
+
+# Extract time information
+site_time0  = as_datetime(gsub(pattern="^days since ",replacement="",x=nc_site$dim$time$units))
+site_time   = site_time0 + days(nc_site$dim$time$vals)
+n_site_time = nc_site$dim$time$len
+
+# Initialise a tibble that will host all data
+site1d = tibble( time = site_time)
+
+# Find conversion factors for monthly variables.
+cmon.day = days_in_month(site1d$time)
+cmon.hr  = day.hr  * cmon.day
+cmon.min = day.min * cmon.day
+cmon.sec = day.sec * cmon.day
+
+# Loop through variables, and load data sets.
+for (o in seq_along(nc_obs)){
+   nc_nvnow        = nc_obs[o]
+   if(nc_nvnow=="H2OSOI"){ #in hlm2dsoi
+   h               = match(tolower(nc_nvnow),hlm2dsoi$vnam)
+   h_vnam          = hlm2dsoi$vnam[h]
+   h_desc          = hlm2dsoi$desc[h]
+   h_add0          = eval(parse(text=hlm2dsoi$add0_sl[h]))
+   h_mult          = eval(parse(text=hlm2dsoi$mult_sl[h]))
+   nc_dat          = ncvar_get(nc=nc_site,varid=nc_nvnow)
+   cat0("   - Retrieve ",h_desc,".")
+   site1d[[h_vnam]] = h_add0 + h_mult * nc_dat  
+   }else{
+   h               = match(tolower(nc_nvnow),hlm1dvar$vnam)
+   h_vnam          = hlm1dvar$vnam[h]
+   h_desc          = hlm1dvar$desc[h]
+   h_add0          = eval(parse(text=hlm1dvar$add0[h]))
+   h_mult          = eval(parse(text=hlm1dvar$mult[h]))
+   nc_dat          = ncvar_get(nc=nc_site,varid=nc_nvnow)
+   cat0("   - Retrieve ",h_desc,".")
+   site1d[[h_vnam]] = h_add0 + h_mult * nc_dat
+   }
+}#end for (o in seq_along(nc_obs))
+
+
+# Load site coordinates. We will check whether observations and model are reasonably close.
+site_coord = tibble( clon = c(ncvar_get(nc=nc_site,varid="LONGXY"))
+                   , clat = c(ncvar_get(nc=nc_site,varid="LATIXY"))
+                   , wlon = c(ncvar_get(nc=nc_site,varid="EDGEW" ))
+                   , elon = c(ncvar_get(nc=nc_site,varid="EDGEE" ))
+                   , slat = c(ncvar_get(nc=nc_site,varid="EDGES" ))
+                   , nlat = c(ncvar_get(nc=nc_site,varid="EDGEN" ))
+                   )#end tibble
+
+
+# Close file and remove connection.
+dummy = nc_close(nc_site)
+rm(nc_site)
+
+```
+
+
+
+
+
+
+```{r,label='time-intersect'}
+# Find the minimum interval that has overlaps with both site and model.
+tstamp_each = unique(ens_tstamp)
+
+tstampa_com = max(c(min(tstamp_each),min(site1d$time)))
+tstampz_com = min(c(max(tstamp_each),max(site1d$time)))
+
+# Restrict time to the overlapping period
+tstamp_com  = tstamp_each[(tstamp_each >= tstampa_com) & (tstamp_each <= tstampz_com)]
+ntstamp_com = length(tstamp_com)
+
+# Trim site observations to the overlapping period. Also, standardize the data so we
+# use only one of NA or NaN.
+site = site1d %>%
+         filter( (time >= tstampa_com) & (time <= tstampz_com)) %>%
+         mutate_at(vars(-time),function(x) ifelse(is.nan(x),NA,x))
+
+#  Load site LAI and AGB to bind with site
+lai = fread(site_lai)
+lai = lai                                %>% 
+      mutate(LAI_DATE = ymd(LAI_DATE)
+            ,year     = year(LAI_DATE)
+            ,month    = month(LAI_DATE)) %>% 
+      dplyr::select(-LAI_DATE)           %>% 
+      group_by(year,month)               %>% 
+      summarize_all(mean,na.rm=TRUE)     %>% 
+      filter(!is.na(year))               
+
+colnames(lai) <- c("year","month","elai","elai_sd")
+agb = fread(site_agb)
+agb = agb                                 %>% 
+      mutate(date       = ymd(date)
+            ,year       = year(date)
+            ,month      = month(date)
+            ,biomass    = biomass/2
+            ,biomass_sd = biomass_sd/2)   %>% 
+      dplyr::select(-date)                %>% 
+      group_by(year,month)                %>% 
+      summarise_all(mean,na.rm=TRUE)      %>% 
+      ungroup()
+colnames(agb) <- c("year","month","agb","agb_sd","sample")
+
+## combine site observations
+site  = site                                  %>%  
+        mutate(year  = year(time)
+              ,month = month(time))           %>% 
+        left_join(agb,by=c("year","month"))   %>% 
+        left_join(lai,by=c("year","month"))   %>% 
+        dplyr::select(-c(agb_sd,sample,elai_sd))
+
+site_var = names(site)
+site_var = gsub(pattern="gpp",replacement="fates_gpp",x=site_var)
+site_var = gsub(pattern="agb",replacement="fates_vegc_aboveground",x=site_var)
+names(site) = site_var
+
+
+```
+
+
+
+
+
+
+
+```{r,label='merge-data',message=FALSE,results='hide'}
+# First we have to filter out HLM variables that are not available at site or within the time frame of obs; 
+# and then combine HLM with site obs to make comparison plots
+
+cat0(" + Find the nearest grid cell from model simulation.")
+
+site_xy = site_coord [1:2] %>% mutate(clon=clon-360)
+nn_pt   = RANN::nn2(orig_xy[,1:2],site_xy[,1:2],k=1)
+xy_model= orig_xy[nn_pt$nn.idx]
+xy_model = xy_model %>% mutate(lon=round(lon,5),lat=round(lat,5))
+
+    
+hlm_site = hlm1d                                              %>% 
+           mutate(lon=round(lon,5)
+                 ,lat=round(lat,5))                           %>% 
+           filter(lon == xy_model$lon & lat == xy_model$lat)   
+   
+          
+
+# intersect variables
+cat0(" + Find the variables common to both site and model.")
+# Find common variables
+var_both = intersect(names(site),names(hlm_site))
+var_both = var_both[! var_both %in% "time"]
+var_both = var_both[c(3,4,6,8,9)] # only select 5
+
+# Restrict variables for both site and model
+site  = site %>% dplyr::select( all_of(c("time",var_both)))
+
+hlm_site = hlm_site                                                      %>% 
+           dplyr::select( all_of(c('time','case',var_both)))  
+
+cat0(" + Merge data sets into a single tibble.")
+
+emean_com  = rbind( site %>% mutate(case = 0L)
+                  , hlm_site)   %>%
+             rename(source = case)
+
+
+# Find the mean seasonal cycle.
+mmean_com = emean_com                                                     %>%
+            mutate(month = month(time))                                   %>%
+            group_by(month,source)                                        %>%
+            dplyr::select(-time)                                          %>%
+            summarise_all(mean, na.rm=TRUE)                               %>%
+            ungroup()                                                     %>%
+            rename_at(vars(var_both), function(x) paste0(x,"_mean"))
+
+# Find the lower range of the seasonal cycle
+mqlwr_com = emean_com                                                         %>%
+            mutate(month = month(time))                                       %>%
+            group_by(month,source)                                            %>%
+            dplyr::select(-time)                                              %>%
+            summarise_all(quantile,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE) %>%
+            ungroup()                                                         %>%
+            rename_at(vars(var_both), function(x) paste0(x,"_qlwr"))
+
+# Find the upper range of the seasonal cycle
+mqupr_com = emean_com                                                         %>%
+            mutate(month = month(time))                                       %>%
+            group_by(month,source)                                            %>%
+            dplyr::select(-time)                                              %>%
+            summarise_all(quantile,probs=qupr_ribbon,names=FALSE, na.rm=TRUE) %>%
+            ungroup()                                                         %>%
+            rename_at(vars(var_both), function(x) paste0(x,"_qupr"))
+
+# Find the annual averages.
+mmean_com = as_tibble( merge( x  = merge(x=mmean_com,y=mqlwr_com,by=c("month","source"))
+                        , y  = mqupr_com
+                        , by = c("month","source")
+                        )#end merge
+                 )#end as_tibble
+
+# Sort data by month and source
+mmean_com = mmean_com %>% arrange(source,month)         
+
+
+```
+
+
+
+
+
+
+
+
+```{r,label='model-site-comparison',message=FALSE,results='hide',fig.width=15, fig.height=12}
+cat0(" + Plot the mean seasonal cycle of site measurements/estimates and model predictions.")
+
+# Set legends
+leg_colours = c(site_colour,ens_colour)
+#leg_labels  = c("Site",as.character(case_desc))
+
+gg_emean = list()
+for( n in sequence(ncase)){
+  case_now = case_names[n]
+  desc_now = case_desc[[n]]
+  h_mmean        = mmean_com %>% filter(source%in%c(0,case_now))
+  leg_labels      = c("Site",desc_now)
+  for (v in seq_along(var_both)){
+   # Load variable
+   h        = c(match(var_both[v],hlm1dvar$vnam), match(var_both[v],hlm2dsoi$vnam))
+   hvars = c("hlm1dvar", "hlm2dsoi")
+   whichvar = hvars[which(!is.na(h))]
+   var_now  = get(whichvar)
+   h        =h[!is.na(h)]
+   h_vnam   = var_now$vnam [h]
+   h_vmean  = paste0(h_vnam,"_mean")
+   h_vqlwr  = paste0(h_vnam,"_qlwr")
+   h_vqupr  = paste0(h_vnam,"_qupr")
+   h_desc   = var_now$desc [h]
+   h_short  = var_now$short[h]
+   h_unit   = var_now$unit [h]
+   h_legend = v == 1 
+
+
+   # Temporary data table. We convert the classes back to factor.
+
+   h_mmean$source = factor(h_mmean$source,levels=unique(h_mmean$source))
+
+   # Initialise plot (we use line)
+   gg_now = ggplot( data    = h_mmean
+                  , mapping = aes_string( x      = "month"
+                                        , group  = "source"
+                                        , colour = "source"
+                                        , fill   = "source"
+                                        )
+                  )#end ggplot
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",labels=leg_labels,values=leg_colours)
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="fill"  ,labels=leg_labels,values=leg_colours)
+
+   # We only add legend for a single plot.  Patchwork will fix this in the end.
+   gg_now = gg_now + geom_ribbon( aes_string(ymin=h_vqlwr,ymax=h_vqupr)
+                                , alpha       = alpha_ribbon
+                                , show.legend = h_legend
+                                , colour      = "transparent"
+                                )#end geom_ribbon
+   gg_now = gg_now + geom_line( aes_string(y=h_vmean)
+                              , linewidth = 0.7
+                              , show.legend = h_legend
+                              )#end geom_line
+
+   
+   # Add local annotation
+   gg_now = gg_now + labs(title=element_blank())
+   gg_now = gg_now + scale_x_continuous( breaks = sequence(12)
+                                       , labels = substring(month.abb,1,1)
+                                       )#end scale_x_continuous
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_bw( base_size      = gg_ptsz
+                             , base_family    = "Helvetica"
+                             , base_line_size = 0.5
+                             , base_rect_size = 0.5
+                               )#end theme_grey
+
+   # Additional legend settings
+   # if (h_legend) gg_now = gg_now + theme( legend.position = "bottom")
+
+   # Axis settings
+   gg_now = gg_now + theme( axis.text.x       = element_text( size   = gg_ptsz
+                                                            , margin = unit(rep(0.35,times=4),"char")
+                                                            )#end element_text
+                          , axis.text.y       = element_text( size   = gg_ptsz
+                                                            , margin = unit(rep(0.35,times=4),"char")
+                                                            )#end element_text
+                          , axis.ticks.length = unit(-0.2,"char")
+                          , axis.title.y      = element_text( size = gg_ptsz * 0.9)
+                          )#end theme
+
+  # Write plot settings to the list.
+  gg_emean[[h_vnam]] = gg_now
+}#end for (v in seq_along(var_both)){
+
+# Wrap plots then global settings and x axis.
+gg_patch = wrap_plots(gg_emean)
+gg_patch = gg_patch + guide_area() + plot_layout(guides="collect")
+gg_patch = gg_patch + plot_annotation(tag_levels = "a")
+
+# Save plots.
+for (d in sequence(ndevice)){
+   h_output = paste0("comparison_meanseason",case_now,".",gg_device[d])
+   dummy    = ggsave( filename = h_output
+                    , plot     = gg_patch
+                    , device   = gg_device[d]
+                    , path     = secy_path
+                    , width    = gg_width
+                    , height   = gg_height
+                    , units    = gg_units
+                    , dpi      = gg_depth
+                    )#end ggsave
+
+}#end for (d in sequence(n_device))
+  
+}
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_patch
+
+
+```
+
+
+
+
+
+
+```{r,label="double-check-agb-seabloom-data"}
+
+## AGB from Vaira Ranch likely includes both live and dead mass, we double check with
+## Seabloom et al. 2020 data https://portal.edirepository.org/nis/mapbrowse?packageid=edi.599.2
+## at Sierra foothill site
+seablm_fates = survi_amean                                   %>% 
+               dplyr::select(case,ens_label,case_ens
+                            ,year,fates_vegc_aboveground)    %>% 
+               rename(agb = fates_vegc_aboveground) 
+keep_fates   = survi_amean                                   %>% 
+               dplyr::select(case,ens_label,case_ens
+                            ,year,fates_vegc_aboveground)    %>% 
+               filter(case_ens %in% ens_keep)                %>% 
+               rename(agb = fates_vegc_aboveground) 
+#amean_now = seablm_fates
+amean_now  = keep_fates
+amean_now$case = factor(amean_now$case,levels=unique(amean_now$case))
+   
+gg_now = ggplot(data=amean_now)
+gg_now = gg_now + geom_line(aes(x=year,y=agb,group=ens_label,color="Model")
+                              ,lwd=1,alpha=0.8,show.legend=TRUE)
+gg_now = gg_now + geom_line(data = sierra_amean,aes(x=year,y=agb,color="Seabloom-SierraFoothill"))
+gg_now = gg_now + scale_colour_manual(name="",values=c("Model"=ens_colour[1]
+                                                ,"Seabloom-SierraFoothill"=site_colour))
+gg_now = gg_now + geom_ribbon( data = sierra_amean
+                                , aes(x = year,ymin=agb_qlwr,ymax=agb_qupr)
+                                , alpha       = alpha_ribbon
+                                , inherit.aes = FALSE
+                                , show.legend = h_legend
+                                , colour      = "transparent"
+                                )
+gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))    
+
+gg_now = gg_now + xlab("Year")
+gg_now = gg_now + ylab(expression(Aboveground~biomass~"("~kgC~m^{-2}~")"))
+gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+gg_now = gg_now + theme(axis.text.x        = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         , axis.title.y = element_text(size = gg_ptsz*0.9)
+                         , legend.text=element_text(size=gg_ptsz*0.7)
+                         , plot.title = element_text(size = gg_ptsz*0.95)
+                         ) #end theme
+p_output = paste0("seablm-keep-agb.",gg_device)
+dummy    = ggsave( filename = p_output
+                 , plot     = gg_now
+                 , device   = gg_device[d]
+                 , path     = plot_main
+                 , width    = gg_width
+                 , height   = gg_height*0.7
+                 , units    = gg_units
+                 , dpi      = gg_depth
+                    )
+
+if(gg_screen) gg_now
+
+```
+
+
+
+
+
+
+```{r,label="test-unit}
+
+test = hlm1d   %>%  dplyr::select(case,lon,lat,time,fates_burnfrac)
+test = test %>% filter(case==1)
+test = test %>% mutate(lon = round(lon,digits = 5),
+                       lat = round(lat,digits=5))
+test11 = test 
+test11$lon_f = factor(test11$lon,levels=unique(test11$lon))
+test11$lat_f = factor(test11$lat,levels=unique(test11$lat))
+
+test11 = test11 %>% group_by(case,lon_f,lat_f)   %>% dplyr::select(-time)  %>% mutate(bfrac=mean(fates_burnfrac)) %>% ungroup() %>% 
+  select(lon,lat,bfrac) %>% distinct()
+test2  = test %>% filter(time=="2020-09-01")
+
+gpp      = ncvar_get(nc_conn,"FATES_GPP")
+bfrac    = ncvar_get(nc_conn,"FATES_BURNFRAC")
+
+gpp_vec  = gpp[,,472] #2020-04
+gpp_vec  = matrix(gpp_vec,ncol=1)
+gpp_vec  =  gpp_vec*2592000
+
+bf_vec   = bfrac[,,476] #2020-08
+bf_vec   = matrix(bf_vec,ncol=1)
+
+fil_var  = matrix(test11$bfrac, nrow=147,ncol=151)
+x_arr    = matrix(test11$lon,nrow=147,ncol=151)
+y_arr    = matrix(test11$lat,nrow=147,ncol=151)
+wrf_star = st_as_stars(fil_var)
+wrf_star = st_as_stars(wrf_star, curvilinear=list(X1=x_arr,X2=y_arr),crs=wgs)
+wrf_sf   = st_as_sf(wrf_star,na.rm=FALSE)
+ca_co    = USAboundaries::us_counties(resolution = "high", states = "CA")
+
+##plot to see how the active domain looks like
+
+p = ggplot() + geom_sf(data=wrf_sf,colour="grey50", aes(fill=A1),lwd=0)+
+  coord_sf(crs=st_crs(wgs)) + 
+  my_theme +scale_fill_continuous(low="thistle2", high="darkred", 
+                                  guide="colorbar",na.value="grey50")+
+  geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
+  geom_point(aes(x=-120.9508,y=38.4133), colour=alpha("blue",0.6), size=0.2)+
+  labs(x="",y="") +
+  guides(fill=guide_legend(title="Burned fraction"))
+p
+
+ggsave(p, filename="case1-bf.jpeg",path=secy_path,width=gg_widthn,height=gg_height,dpi=gg_depth,device=gg_device[1])
+
+
+
+fil_var  = matrix(mar_rain$rain, nrow=147,ncol=151)
+x_arr    = matrix(mar_rain$lon,nrow=147,ncol=151)
+y_arr    = matrix(mar_rain$lat,nrow=147,ncol=151)
+wrf_star = st_as_stars(fil_var)
+wrf_star = st_as_stars(wrf_star, curvilinear=list(X1=x_arr,X2=y_arr),crs=wgs)
+wrf_sf   = st_as_sf(wrf_star,na.rm=FALSE)
+ca_co    = USAboundaries::us_counties(resolution = "high", states = "CA")
+
+##plot to see how the active domain looks like
+
+p = ggplot() + geom_sf(data=wrf_sf,colour="grey50", aes(fill=A1),lwd=0)+
+  coord_sf(crs=st_crs(wgs)) + 
+  my_theme +scale_fill_continuous(low="thistle2", high="darkred", 
+                                  guide="colorbar",na.value="grey50")+
+  geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
+  geom_point(aes(x=-120.9508,y=38.4133), colour=alpha("blue",0.6), size=0.2)+
+  labs(x="",y="") +
+  guides(fill=guide_legend(title="Precip-March"))
+p
+
+ggsave(p, filename="case1-bf.jpeg",path=secy_path,width=gg_widthn,height=gg_height,dpi=gg_depth,device=gg_device[1])
+
+```
+
