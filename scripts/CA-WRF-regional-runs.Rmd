@@ -41,29 +41,42 @@ invisible(gc())
 
 ```{r, label="path-setting"}
 home_path   = path.expand("~")
-local_path  = file.path(home_path,"Downloads/regional-runs")
+local_path  = file.path("~/Google Drive/My Drive/all/regional-runs/regional-runs-set3")
 main_path   = file.path("~/Google Drive/My Drive/all")
 region_path = file.path(main_path,"regional-runs")
+#nc_path     = file.path(region_path,"regional-runsp1")
 util_path   = file.path(home_path,"Util/RUtils")
 
+## set 2
+#cases       = c( "regional-avba-N08T27_CLM_FATES.clm2.nc"
+#               , "regional-quant-genl-N12T25_CLM_FATES.clm2.nc"
+#               , "regional-site-genl-N02T19_CLM_FATES.clm2.nc"
+#               , "regional-site-genl-N04T06_CLM_FATES.clm2.nc"
+#              )
 
+# set 1
+#cases        = c( "regional-low-genl-N05T08_CLM_FATES.clm2.nc"
+#                , "regional-mean-brdi-N09T04_CLM_FATES.clm2.nc"
+#                , "regional-median-genl-N12T18_CLM_FATES.clm2.nc"
+#                , "regional-quant-genl-N08T27_CLM_FATES.clm2.nc")
+
+## set 3
 cases       = c( "regional-low-genl-N05T08_CLM_FATES.clm2.nc"
-               , "regional-mean-brdi-N09T04_CLM_FATES.clm2.nc"
-               , "regional-median-genl-N12T18_CLM_FATES.clm2.nc"
                , "regional-quant-genl-N08T27_CLM_FATES.clm2.nc"
+               , "regional-quant-genl-N12T25_CLM_FATES.clm2.nc"
               )
 
-case_files   = file.path(local_path,cases)
+#case_files   = file.path(local_path,cases)
+case_files   = file.path(local_path, cases)
 ncase        = length(cases)
-case_names   = c(1L,2L,3L,4L)
+case_names   = c(1L,2L,3L)
 
 case_desc    = c( "Low-GENL-G1-N05T08"
-               , "Mean-BRDI-G3-N09T04"
-               , "Median-GENL-G1-N1218"
-               , "Quant-GENL-G1-N08T27"
+               ,  "Medium-GENL-G1-N08T27"
+               ,  "High-GENL-G1-N12T25"
                )
 
-names(case_desc) = c("1","2","3","4")
+names(case_desc) = c("1","2","3")
 
 #Observation path
 obs_main    = file.path("~/Google Drive/My Drive/CA-grassland-simulationDoc/benchmark")
@@ -82,6 +95,7 @@ agbP_path   = file.path(pwood_main,agb_base)
 lai_path    = file.path(ras_main,"LAI-WRF-grassonly.csv")
 gpp_path    = file.path(ras_main,"GPP-WRF-grassonly.csv")
 frap_grass  = file.path(frap_main,"Bfrac-WRF-grassonly.csv")
+tbf_grass   = file.path(frap_main,"total-annual-BF-grasslands-3sources.csv")
 wrf_path    = file.path("~/Google Drive/My Drive/9km-WRF-1980-2020/1981-01.nc")
 clim_main   = file.path(obs_main,"global-historical-climate/wc2.1_10m_bio")
 
@@ -204,7 +218,7 @@ fuelinfo[[n]]   = list( id      = 6
 
 ```{r,label="plot-setting"}
 
-gg_device  = c("png")     # Output devices to use (Check ggsave for acceptable formats)
+gg_device  = c("tiff")     # Output devices to use (Check ggsave for acceptable formats)
 gg_depth   = 600          # Plot resolution (dpi)
 gg_ptsz    = 18           # Font size
 gg_ptszl   = 26
@@ -238,6 +252,7 @@ qupr_ribbon  = pnorm(+sdev_ribbon) # Lower quantile for ribbon
 alpha_ribbon = 0.2
 
 ```
+
 
 
 
@@ -1300,7 +1315,9 @@ bf_quantyr = cags_bf                                 %>%
 
 
 ## load SIF re-sampled regional GPP
-gpp_ob    = fread(gpp_path)
+gpp_ob       = fread(gpp_path)
+gpp_ob       = gpp_ob %>% mutate(lon = round(lon,digits=5),
+                                 lat = round(lat,digits=5))
 gpp_ob$lon_f = factor(gpp_ob$lon,levels=unique(gpp_ob$lon))
 gpp_ob$lat_f = factor(gpp_ob$lat,levels=unique(gpp_ob$lat))
 orig_xy      = gpp_ob %>% dplyr::select(lon,lat,lon_f,lat_f) %>% distinct()
@@ -1320,6 +1337,8 @@ gpp_ameanGrow = orig_xy %>% left_join(gpp_ameanGrow,by=c("lon_f","lat_f"))
 
 ## load MODIS re-sampled regional LAI 
 lai_ob = fread(lai_path)
+lai_ob = lai_ob %>% mutate(lon = round(lon,digits=5),
+                           lat = round(lat,digits=5))
 lai_ob$lon_f = factor(lai_ob$lon,levels=unique(lai_ob$lon))
 lai_ob$lat_f = factor(lai_ob$lat,levels=unique(lai_ob$lat))
 orig_xy      = lai_ob %>% dplyr::select(lon,lat,lon_f,lat_f) %>% distinct()
@@ -1339,8 +1358,13 @@ lai_ameanGrow = orig_xy %>% left_join(lai_ameanGrow,by=c("lon_f","lat_f"))
 
 
 ## join GPP, and LAI
-ras_ameanAll = gpp_ameanAll %>% left_join(lai_ameanAll,by=c("lon","lat","lon_f","lat_f"))
-ras_ameanGrow = gpp_ameanGrow %>% left_join(lai_ameanGrow,by=c("lon","lat","lon_f","lat_f"))
+ras_ameanAll = gpp_ameanAll %>% left_join(lai_ameanAll,by=c("lon","lat","lon_f","lat_f")) 
+ras_ameanGrow = gpp_ameanGrow %>% left_join(lai_ameanGrow,by=c("lon","lat","lon_f","lat_f"))  
+
+## total burned fraction by year from FRAP, SHORT, and a merged FRAP-SHORT(only fire <300 acer)
+tbf    = fread(tbf_grass)
+tbf    = tbf %>% filter(year %in% simu_time)
+
 
 ```
 
@@ -1444,6 +1468,16 @@ cell_mmean = orig_xy %>% left_join(cell_mmean,by=c("lon_f","lat_f"))
 hlm_var   = c("fates_gpp","fates_vegc_aboveground",
               "eflx_lh_tot","elai","fsh")
 fire_month = c("6","7","8","9","10")
+## load simulation using BRDI allometry
+hlm1d_2 = fread("~/Google Drive/My Drive/all/regional-runs/Figures-set1/region_hlm1d.csv")
+hlm1d_2 = hlm1d_2 %>% filter(case==2) 
+hlm1d_2 = hlm1d_2 %>% mutate(case=4)
+hlm1d   = rbind(hlm1d, hlm1d_2)
+case_desc2 = c("Mean-BRDI-G3-N09T04")
+names(case_desc2)=c("4")
+case1d_desc = c(case_desc, case_desc2)
+ncase_1d  = length(case_desc)
+case1d_names = c(1L,2L,3L,4L)
 
 hlm1d$lon_f = factor(hlm1d$lon,levels=unique(hlm1d$lon))
 hlm1d$lat_f = factor(hlm1d$lat,levels=unique(hlm1d$lat))
@@ -1537,16 +1571,16 @@ mean_allseson = allmean_hlm  %>% left_join(mean_bfall,by=c("case","lon","lat")) 
 
 ## merge FRAP mean burned fraction and GPP, LAI observations as well
 grosea_hlmcom = mean_pseason                               %>% 
+                mutate(lon = round(lon,5),
+                       lat = round(lat,5))                 %>% 
                 left_join(ras_ameanGrow,by=c("lon","lat")) %>% 
-                mutate(lon = round(lon,5)
-                      ,lat = round(lat,5))                 %>% 
                 left_join(cags_dmean,by=c("lon","lat"))
 
 
 allsea_hlmcom = mean_allseson                              %>% 
-                left_join(ras_ameanAll,by=c("lon","lat"))  %>% 
                 mutate(lon = round(lon,5)
                       ,lat = round(lat,5))                 %>% 
+                left_join(ras_ameanAll,by=c("lon","lat"))  %>% 
                 left_join(cags_dmean,by=c("lon","lat"))
 
 
@@ -1597,9 +1631,9 @@ wgs = "+init=EPSG:4326"
 emean_loop = which(hlm1dvar$vnam %in% plot_hlm)
 
 gg_emean   = list()
-for(c in sequence(ncase)){
-  case_now = case_names[c]
-  desc_now = case_desc[c]
+for(c in sequence(ncase_1d)){
+  case_now = case1d_names[c]
+  desc_now = case1d_desc[c]
 mmean_now        = mean_allseson %>% filter(case == case_now) 
 for (h in emean_loop){
    h_vnam   = hlm1dvar$vnam[h] 
@@ -1622,6 +1656,8 @@ for (h in emean_loop){
    
    gg_now = ggplot()
    gg_now = gg_now + geom_sf(data=wrf_sf,aes(fill=A1),color=NA)
+   gg_now = gg_now + scale_x_continuous(limits = c(-125, -112),expand = c(0,0))
+   gg_now = gg_now + scale_y_continuous(limits = c(32, 42.5),expand = c(0,0))
    gg_now = gg_now + coord_sf(crs=st_crs(wgs)) 
    gg_now = gg_now + scale_fill_continuous(low="blue", high="red", guide="colorbar",na.value="white")
    gg_now = gg_now + geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) 
@@ -1652,7 +1688,7 @@ for (h in emean_loop){
                     , width    = gg_widthn*0.6
                     , height   = gg_height*0.6
                     , units    = gg_units
-                    , dpi      = gg_depth
+                    #, dpi      = gg_depth
                     )
    }
   gg_emean[[h_vnam]] = gg_now      
@@ -1674,54 +1710,105 @@ if (gg_screen) gg_emean
 
 ```{r,label="model-to-observation-spatial-and-scatter-plot"}
 
+### first calculate RMSE for predicted GPP, LAI, and BA
+
+rmse_fun  = function(mod, obs){
+  rmse = sqrt(mean((mod-obs)^2,na.rm=TRUE))
+  return(rmse)
+}
+
+rmse_df   = grosea_hlmcom                                        %>% 
+            filter(!is.na(fates_gpp))                            %>% 
+            group_by(case)                                       %>% 
+            summarize(gpp_rmse = rmse_fun(mod = fates_gpp,
+                                          obs = gpp),
+                      gpp_rng  = max(gpp,na.rm=T) - min(gpp,na.rm=T),
+                      lai_rmse = rmse_fun(mod = elai,
+                                          obs = lai),
+                      lai_rng = max(lai)-min(lai),
+                      ba_rmse  = rmse_fun(mod = fates_burnfrac,
+                                          obs = bfrac),
+                      ba_rng  = max(bfrac) - min(bfrac))
+rmse_df = rmse_df %>% mutate(gpp_nrmse = gpp_rmse/gpp_rng,
+                             lai_nrmse = lai_rmse/lai_rng,
+                             ba_nrmse  = ba_rmse/ba_rng)
+  
+
 cat0(" + Plot  model observation comparison.")      
 
 plot_vars  = c("fates_gpp","elai","fates_burnfrac")
 match_obs  = c("gpp","lai","bfrac")
-
+obs_label  = c("SIF","MODIS","FRAP")
+#cols <- brewer.pal(n = 5, name = "RdBu",direction=-1) 
+cols  = c("#0571B0","#92C5DE","#FFDCD1","#F4A582","#CA0020")
 nloop=length(plot_vars)
-for (p in sequence(nloop)){
-  var_now = plot_vars[p]
-  ob_var = match_obs[p]
-  h = which(hlm1dvar$vnam %in% var_now)
-  h_vnam   = hlm1dvar$vnam[h] 
-  h_desc   = hlm1dvar$desc [h]
-  h_short  = hlm1dvar$short[h]
-  h_unit   = hlm1dvar$unit [h]
- 
-  for(n in sequence(ncase)){
-  case_now = case_names[n]
-  desc_now = case_desc[n]
+for(n in sequence(ncase_1d)){
+  all_plots = list()
+  case_now = case1d_names[n]
+  desc_now = case1d_desc[n]
   bf_now = grosea_hlmcom %>% filter(case==case_now)
+  for (l in sequence(nloop)){
+    
+    var_now = plot_vars[l]
+    ob_var = match_obs[l]
+    ob_label = obs_label[l]
+    h = which(hlm1dvar$vnam %in% var_now)
+    h_vnam   = hlm1dvar$vnam[h] 
+    h_desc   = hlm1dvar$desc [h]
+    h_short  = hlm1dvar$short[h]
+    h_unit   = hlm1dvar$unit [h]
+    
 
-  fil_mod  = matrix(bf_now[[var_now]], nrow=147,ncol=151)
-  x_arr    = matrix(bf_now$lon,nrow=147,ncol=151)
-  y_arr    = matrix(bf_now$lat,nrow=147,ncol=151)
-  mod_star = st_as_stars(fil_mod)
-  mod_star = st_as_stars(mod_star, curvilinear=list(X1=x_arr,X2=y_arr), crs=wgs)
-  mod_sf   = st_as_sf(mod_star,as_points=FALSE,na.rm=FALSE)
-  ca_co    = USAboundaries::us_counties(resolution = "high", states = "CA")
+  
+  
+  #if(var_now!="fates_burnfrac"){
+   # ylim   = range(c(bf_now[[var_now]], bf_now[[ob_var]]),na.rm=TRUE) #}else{
+    y = c(bf_now[[var_now]], bf_now[[ob_var]])
+    rng = range(y,na.rm=TRUE)
+    qn     = quantile(y, c(0.25,0.95),na.rm=TRUE)
+    qn_rescle = rescale(c(qn, range(y,na.rm=TRUE)))
+    brks      = c(0, seq(qn_rescle[1],qn_rescle[2],length.out=3),1)
+    
+   #}
+  
+    fil_mod  = matrix(bf_now[[var_now]], nrow=147,ncol=151)
+    x_arr    = matrix(bf_now$lon,nrow=147,ncol=151)
+    y_arr    = matrix(bf_now$lat,nrow=147,ncol=151)
+    mod_star = st_as_stars(fil_mod)
+    mod_star = st_as_stars(mod_star, curvilinear=list(X1=x_arr,X2=y_arr), crs=wgs)
+    mod_sf   = st_as_sf(mod_star,as_points=FALSE,na.rm=FALSE)
+    wd_ratio = tmaptools::get_asp_ratio(mod_sf)
+    ca_co    = USAboundaries::us_counties(resolution = "high", states = "CA")
 
-
- mod = ggplot() + geom_sf(data=mod_sf, aes(fill=A1),color=NA)+
-  coord_sf(crs=st_crs(wgs)) + 
-  scale_fill_continuous(low="blue", high="red", guide="colorbar",na.value="white")+
-  geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
-  labs(x="",y="") +
-  guides(fill=guide_legend(title=desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))) +
-  theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5) +
-  theme( legend.position  = "right"
-       , legend.title     = element_text(size=gg_ptsz*0.85)
-       , legend.text      = element_text(size=gg_ptsz*0.85)
-       , panel.background = element_blank()
-       , panel.border     = element_rect(linewidth = 1.6, fill=NA)
-       , axis.text.x      = element_text( size   = gg_ptsz*0.85
-       , margin           = unit(rep(0.35,times=4),"cm"))#end element_text
-       , axis.text.y      = element_text( size   = gg_ptsz*0.85
-       , margin           = unit(rep(0.35,times=4),"cm")
+    mod = ggplot() + geom_sf(data=mod_sf, aes(fill=A1),color=NA)+
+    coord_sf(crs=st_crs(wgs)) + 
+    scale_fill_gradientn(colours=cols, guide="colorbar", na.value="white", 
+                      values=brks, limits=rng,oob = scales::squish) +
+  #scale_fill_continuous(low="blue", high="red", na.value="white", guide="colorbar", limits=ylim,oob = scales::squish)+
+    geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
+    scale_x_continuous(limits = c(-124, -113)) +
+    scale_y_continuous(limits = c(32, 42.5)) + 
+    labs(x=NULL,y=NULL,title="CLM-FATES") +
+    guides(fill=guide_legend(title=desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))) +
+    theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5) +
+    theme(  legend.position  = "none"
+        , legend.title     = element_text(size=gg_ptsz)
+        , legend.text      = element_text(size=gg_ptsz)
+        , plot.title       = element_text(size=gg_ptsz, vjust=1)
+        , panel.background = element_blank()
+        #, panel.border     = element_rect(linewidth = 1.6, fill=NA)
+        , panel.border     = element_blank()
+        #, axis.text.x      = element_text( size   = gg_ptsz*0.85
+        , axis.text.x      = element_blank()
+        #, margin           = unit(rep(0.35,times=4),"cm")#end element_text
+        #, axis.text.y      = element_text( size   = gg_ptsz*0.85
+        , axis.text.y      = element_blank()
+        #, margin           = unit(rep(0.35,times=4),"cm")
+        , axis.ticks=element_blank()
+        ,plot.margin = unit(c(0,0,0,0), "cm")
       )#end element_text
-     , axis.ticks.length = unit(-0.25,"cm")
-      ) #end theme
+     #, axis.ticks.length = unit(-0.25,"cm")
+#      ) #end theme
 
   fil_obs  = matrix(bf_now[[ob_var]], nrow=147,ncol=151)
   obs_star = st_as_stars(fil_obs)
@@ -1730,50 +1817,102 @@ for (p in sequence(nloop)){
 
   obs = ggplot() + geom_sf(data=obs_sf, aes(fill=A1),color=NA)+
   coord_sf(crs=st_crs(wgs)) + 
-  scale_fill_continuous(low="blue", high="red", guide="colorbar",na.value="white")+
+  #scale_fill_continuous(low="blue", high="red", na.value="white", guide="colorbar", limits=ylim,oob = scales::squish)+
+  scale_fill_gradientn(colours=cols, guide="colorbar", na.value="white",
+                       values = brks, limits=rng,oob=scales::squish) +
   geom_sf(data = ca_co, color = alpha("black", alpha=1),lwd=0.1,fill=NA) +
-  labs(x="",y="") +
-  #guides(fill=guide_legend(title=desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))) +
-  guides(fill=guide_legend(title=desc.unit(desc="Observation",unit=untab[[h_unit]],dxpr=TRUE))) +
-  theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
-   theme( legend.position  = "right"
-        , legend.title     = element_text(size=gg_ptsz*0.85)
-        , legend.text      = element_text(size=gg_ptsz*0.85)
+  scale_x_continuous(limits = c(-124, -113)) +
+  scale_y_continuous(limits = c(32, 42.5)) +
+  labs(x=NULL,y=NULL,title=ob_label) +
+  guides(fill=guide_legend(title=desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))) +
+  #guides(fill=guide_legend(title=desc.unit(desc=paste0(ob_label,"-",h_short),unit=untab[[h_unit]],dxpr=TRUE))) +
+  theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5) +
+  theme( legend.position   = "right"
+        , legend.title     = element_text(size=gg_ptsz)
+        , legend.text      = element_text(size=gg_ptsz)
         , panel.background = element_blank()
-        , panel.border     = element_rect(linewidth = 1.6, fill=NA)
-        , axis.text.x      = element_text( size   = gg_ptsz*0.85
-        , margin           = unit(rep(0.35,times=4),"cm"))#end element_text
-        , axis.text.y      = element_text( size   = gg_ptsz*0.85
-        , margin           = unit(rep(0.35,times=4),"cm")
+        , plot.title       = element_text(size=gg_ptsz, vjust=1)
+        #, panel.border     = element_rect(linewidth = 1.6, fill=NA)
+        #, axis.text.x      = element_text( size   = gg_ptsz*0.85
+        #, margin           = unit(rep(0.35,times=4),"cm"))#end element_text
+        #, axis.text.y      = element_text( size   = gg_ptsz*0.85
+        #, margin           = unit(rep(0.35,times=4),"cm")
+        , panel.border = element_blank()
+        , axis.text.x  = element_blank()
+        , axis.text.y  = element_blank()
+        , axis.ticks=element_blank()
+        , plot.margin = unit(c(0,0,0,0), "cm")
       )#end element_text
-     , axis.ticks.length = unit(-0.25,"cm")
-      ) #end theme
-  
-  scat = ggplot() + geom_point(data=bf_now,aes_string(x=var_now,y=ob_var)) +
-         labs(x="Model",y="Observation") +
-         geom_abline(slope=1,intercept=0,linetype="dashed",color="black",linewidth=1) +
-         theme_grey( base_size = gg_ptsz*0.85, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+     #, axis.ticks.length = unit(-0.25,"cm")
+#      ) #end theme
+ if(l==3){
+   scat = ggplot() + geom_point(data=bf_now,aes_string(x=var_now,y=ob_var)) 
+   scat = scat + labs(x="Model",y="Observation")
+   if(n==3){scat = scat + scale_x_continuous(limits = c(0,0.01),n.breaks= 3)}else{
+    scat = scat + scale_x_continuous(n.breaks= 3) 
+   }
+   scat = scat + geom_abline(slope=1,intercept=0,linetype="dashed",color="black",linewidth=1)
+   scat = scat + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   scat = scat + 
          theme( legend.position  = "none" 
               , panel.background = element_blank()
               , panel.border     = element_rect(linewidth = 1.6, fill=NA)
-              , axis.text.x      = element_text( size   = gg_ptsz*0.85
+              , axis.text.x      = element_text( size   = gg_ptsz
               , margin           = unit(rep(0.35,times=4),"cm"))#end element_text
-              , axis.text.y      = element_text( size   = gg_ptsz*0.85
+              , axis.text.y      = element_text( size   = gg_ptsz
                                                , margin = unit(rep(0.35,times=4),"cm")
                                                )#end element_text
               , axis.ticks.length = unit(-0.25,"cm")
-              ) #end theme
-
+              , plot.margin = unit(c(0,0,0,0), "cm")
+         ) #end theme
+ }else{
+   scat = ggplot() + geom_point(data=bf_now,aes_string(x=var_now,y=ob_var)) +
+          labs(x=NULL,y="Observation") +
+          geom_abline(slope=1,intercept=0,linetype="dashed",color="black",linewidth=1) +
+          theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+          theme( legend.position  = "none" 
+              , panel.background = element_blank()
+              , panel.border     = element_rect(linewidth = 1.6, fill=NA)
+              , axis.text.x      = element_text( size   = gg_ptsz
+              , margin           = unit(rep(0.35,times=4),"cm"))#end element_text
+              , axis.text.y      = element_text( size   = gg_ptsz
+                                               , margin = unit(rep(0.35,times=4),"cm")
+                                               )#end element_text
+              , axis.ticks.length = unit(-0.25,"cm")
+              , plot.margin = unit(c(0,0,0,0), "cm")
+         ) #end theme
+ }
   
-  p = mod + scat + obs +
-      guide_area() + 
-      plot_layout(ncol=2,widths=c(3,1,3))   
-
+  p1 = mod +  plot_spacer() + obs  +
+     plot_layout(guides="keep",widths = c(1.5,-0.4,1.5,1), nrow=1) 
+  p2 = p1 + scat
+  #p = wrap_plots(mod,obs,scat) + 
+     #plot_layout(guides="collect",width=c(2,2,1),ncol=3) 
+   all_plots[[l]] = p2
    fname = paste0(case_now,"-",var_now,"_model-obs.png")
-   ggsave(p, filename=fname,path=secy_path,width=gg_widthn,height=gg_height,dpi=gg_depth,device=gg_device[1])
+   ggsave(p2, filename=fname,path=secy_path,width=gg_widthn*0.6,height=gg_height*0.45,dpi=gg_depth,device=gg_device[1]) 
+   fname = paste0(case_now,"-",var_now,"_mod.png")
+   ggsave(mod, filename=fname,path=secy_path,width=gg_widthn*0.7,height=gg_height*0.7,dpi=gg_depth,device=gg_device[1])
+   fname = paste0(case_now,"-",var_now,"_obs.png")
+   ggsave(obs, filename=fname,path=secy_path,width=gg_widthn*0.7,height=gg_height*0.7,dpi=gg_depth,device=gg_device[1])
+   
+  }
+  gg_patch = all_plots[[1]] / all_plots[[2]] / all_plots[3]
+  for (d in sequence(ndevice)){ 
+    h_output = paste0(case_now,"-mod-obs-all.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot      = gg_patch
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_widthn*0.8
+                    , height    = gg_widthn*wd_ratio*0.9
+                    , units     = gg_units
+                    #, dpi       = gg_depth
+                    )
+   }
 }
-  
-}
+
+ 
 
 
 ### annual total burned fraction compare to FRAP
@@ -1782,19 +1921,19 @@ mo_allamean = hlm1d                                                        %>%
               mutate(year=year(time))                                      %>% 
               group_by(case,year)                                          %>% 
               summarize(bf_amean=sum(fates_burnfrac,na.rm=TRUE))           %>% 
-              mutate(bf_amean = bf_amean)                                  %>%
+              mutate(bf_amean = bf_amean/749)                              %>%
               ungroup()                                                    %>% 
-              mutate(case=case_desc[case])
-ob_amean = cags_bf                                                         %>% 
-           group_by(year)                                                  %>% 
-           summarize(bf_amean=sum(bfrac,na.rm=TRUE))                       %>% 
-           mutate(case="FRAP")
+              mutate(case=case_desc[case])  %>% filter(case == "Quant-GENL-G1-N08T27")
+
+ob_amean = tbf                                                             %>%
+           dplyr::select(source,year,bfrac)                                %>% 
+           rename( case=source, bf_amean=bfrac)
 
 amean_comm = rbind(mo_allamean,ob_amean)
 #amean_comm$case=factor(amean_comm$case,levels=unique(amean_comm$case))
 gg_now = ggplot(amean_comm,aes(year,bf_amean,colour=case)) + geom_line() +
-scale_color_manual(name="",values=ens_colour) +
-  labs(x="",y="Summed burned fraction")+
+scale_color_manual(name="",values=top12) +
+  labs(x="",y=expression("Summed burned fraction"~"("*yr^-1*")"))+
   theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
   theme( legend.position   = "right" 
        , legend.text = element_text(size=gg_ptsz-5)
@@ -1807,10 +1946,16 @@ scale_color_manual(name="",values=ens_colour) +
       )#end element_text
       , axis.ticks.length = unit(-0.25,"cm")
       ) #end theme
-out_name = "summed-BF-all.png"
+out_name = "summed-BF-qunt-obs.png"
 ggsave(gg_now, filename=out_name,path=secy_path,width=gg_widthn*0.6,height=gg_height*0.6,dpi=gg_depth,device=gg_device[1])
 
+
+
 ```
+
+
+
+
 
 
 
@@ -1856,7 +2001,7 @@ for(c in sequence(ncase)){
   rownames(corr_allens) = nam_peak
 
   colnames(p_all) = nam_peak
-  rownames(p_all) = cnam_peak
+  rownames(p_all) = nam_peak
   
   f_output = paste0(desc_now,"_",type,"_correlation.png")
   png(file=file.path(plot_main,f_output),width=13,height=8,units="in",res=600)
@@ -1882,7 +2027,7 @@ for(c in sequence(ncase)){
 
 cor_all   = cor_all[,c(1,4:5,7,9:10,12:14,16)]
 nam_all   = c("GPP","AGB","LAI","$ Rain", "$ AirTemp[2*m]","$ qv[2*m]",
-              "BurnFrac", "FuelLoad","WindSpeed[10*m]")
+              "BurnFrac", "FuelLoad","$ WindSpeed[10*m]")
 
 type   = "all season"
 
@@ -1904,7 +2049,7 @@ for(c in sequence(ncase)){
   rownames(p_all) = nam_all
   
   f_output = paste0(desc_now,"_",type,"_correlation.png")
-  png(file=file.path(plot_main,f_output),width=13,height=8,units="in",res=600)
+  png(file=file.path(plot_main,f_output),width=6,height=5,units="in",res=600)
 
   corrplot(corr_allens
           ,method      = "ellipse"
@@ -1913,7 +2058,7 @@ for(c in sequence(ncase)){
           ,sig.level   = 0.05
           ,insig       = "blank"
           ,addCoef.col = "grey50"
-          ,title = paste(desc_now,type,"correlation",sep=" ")
+          #,title = paste(desc_now,type,"correlation",sep=" ")
           ,mar=c(0,0,1,0)
           ,order = "original"
           ,diag  = FALSE
@@ -2157,17 +2302,17 @@ names(var_label)     = c("fates_gpp"
 decomp_plot=list()
 for(c in sequence(ncase)){
   desc_now   = case_desc[c]
-  decomp_now = sens_decom %>% filter(case==desc_now)
+  decomp_now = sens_decom %>% filter(case==desc_now & model_var=="fates_burnfrac") 
   
   gg_now = ggplot(decomp_now,aes(var_decomp,label)) 
   gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp,colour=type)
-                                  ,size=4, position = position_dodge(width = 0.2))
+                                  ,size=4, position = position_dodge(width = 0.5))
   gg_now = gg_now + scale_colour_manual(values = c("black","grey50"))
   gg_now = gg_now + facet_wrap(.~ model_var,labeller=labeller(model_var=var_label))
-  gg_now = gg_now + labs(title = paste(desc_now,type,sep="-"))
+  #gg_now = gg_now + labs(title = paste(desc_now,type,sep="-"))
   gg_now = gg_now + xlab("Variance explained (%)")
   gg_now = gg_now + ylab(element_blank())
-  gg_now = gg_now + scale_y_discrete(labels = scales::label_parse())
+  gg_now = gg_now + scale_y_discrete(labels = scales::label_parse(),limits=rev)
   gg_now = gg_now + theme_grey( base_size = gg_ptsz
                               , base_family = "Helvetica"
                               , base_line_size = 0.5
@@ -2181,6 +2326,7 @@ for(c in sequence(ncase)){
                           , axis.ticks.length = unit(-0.25,"cm")
                           , legend.position   = "bottom"
                           , legend.direction  = "horizontal"
+                          , plot.margin = unit(c(0,0,0,0),"cm")
                           )#end theme
   for (d in sequence(ndevice)){
     f_output = paste0(desc_now,"-",type,"-variance-decomp.",gg_device[d])
@@ -2188,8 +2334,8 @@ for(c in sequence(ncase)){
                      , plot     = gg_now
                      , device   = gg_device[d]
                      , path     = plot_main
-                     , width    = gg_widthn
-                     , height   = gg_height
+                     , width    = gg_widthn*0.4
+                     , height   = gg_height*0.4
                      , units    = gg_units
                      , dpi      = gg_depth
                      )
@@ -2199,9 +2345,35 @@ for(c in sequence(ncase)){
 if(gg_screen) decomp_plot
 
 
+
+
 ```
 
 
+
+
+
+```{r,label="multi-variates-model"}
+
+lmod_df   = mean_allseson %>% filter(!is.na(fates_burnfrac)) %>% mutate(case = as.factor(case))
+fuel_mod  = lm(fates_burnfrac ~ case*fates_fuel_amount, data = lmod_df)
+summary(fuel_mod)
+
+resid_fuel = resid(fuel_mod)
+
+lmod_df$bf_rsd = resid_fuel
+u10_mod   = lm(bf_rsd ~ u10, data = lmod_df)
+rain_mod  = lm(bf_rsd ~ rain, data = lmod_df)
+tsa_mod   = lm(bf_rsd ~ tsa, data = lmod_df)
+q2_mod    = lm(bf_rsd ~ q2m, data = lmod_df)
+full_mod  = lm(bf_rsd ~ rain*tsa*q2m*u10, data = lmod_df)
+t = BIC(u10_mod,rain_mod,tsa_mod,q2_mod,full_mod)
+summary(bf_mod)
+
+
+
+
+```
 
 
 
@@ -2275,7 +2447,7 @@ agb_amean    = agb_amean                         %>%
                dplyr::select(-id)
 
 mod_agb     = hlm1d                         %>% 
-              filter(case==4)               %>% 
+              filter(case==2)               %>% 
               mutate(year=year(time))       %>% 
               group_by(lon_f,lat_f,year)    %>% 
               summarize(agb_mod = max(fates_vegc_aboveground)
@@ -2307,7 +2479,6 @@ mod_df   = mod_df %>% left_join(site_lab,by=c("longitude","latitude")) %>%
 obs_df   = agb_amean %>% dplyr::select(year,site,agb,mat,map) %>% mutate(source="site")
 plot_df = rbind(obs_df,mod_df)           
 
-mod = lm(agb ~ mat + map + source,plot_df)
 
 gg_now = ggplot(data=plot_df,aes(x=mat,y=agb,colour=source)) + 
          geom_point()  +
@@ -2349,6 +2520,27 @@ gg_now = ggplot(data=plot_df,aes(x=map,y=agb,colour=source)) +
                 ) #end theme
 
 ggsave(gg_now,filename="agb-map-benchmark.png",path=plot_main,
+       width=gg_widthn*0.6,height=gg_height*0.6,unit=gg_units,dpi=gg_depth)
+
+
+gg_now = ggplot(data=plot_df,aes(x=mat,y=map,colour=source)) + 
+         geom_point()  +
+         geom_smooth(method="lm",size=1) +
+         labs( x=expression("Mean annual temperature ("*degree~C*")")
+             , y="Mean annual precipitation (mm)")+
+         theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)+
+         theme(  legend.position   = "right" 
+               , legend.title=element_blank()
+               , panel.background  = element_blank()
+               , panel.border      = element_rect(linewidth = 1.6, fill=NA)
+               , axis.text.x       = element_text( size   = gg_ptsz-5
+                                                 , margin = unit(rep(0.35,times=4),"cm"))#end element_text
+               , axis.text.y       = element_text( size   = gg_ptsz-5
+                                                 , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+               , axis.ticks.length = unit(-0.25,"cm")
+                ) #end theme
+ggsave(gg_now,filename="mat-map-correlation.png",path=plot_main,
        width=gg_widthn*0.6,height=gg_height*0.6,unit=gg_units,dpi=gg_depth) 
 
 
@@ -2534,7 +2726,7 @@ names(site) = site_var
 cat0(" + Find the nearest grid cell from model simulation.")
 
 site_xy = site_coord [1:2] %>% mutate(clon=clon-360)
-nn_pt   = RANN::nn2(orig_xy[,1:2],site_xy[,1:2],k=1)
+nn_pt   = RANN::nn2(orig_xy[,2:3],site_xy[,1:2],k=1)
 xy_model= orig_xy[nn_pt$nn.idx]
 xy_model = xy_model %>% mutate(lon=round(lon,5),lat=round(lat,5))
 

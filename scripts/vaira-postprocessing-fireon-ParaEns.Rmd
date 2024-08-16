@@ -43,7 +43,7 @@ invisible(gc())
 ```{r, label="path"}
 home_path   = path.expand("~")
 main_path   = file.path("~/Google Drive/My Drive/all")
-fireon_path = file.path(main_path,"fireon-site")
+fireon_path = file.path(main_path,"fireon-site/2022-11-02")
 util_path   = file.path(home_path,"Util/RUtils")
 
 
@@ -73,7 +73,7 @@ case_desc   = c( "AVBA-Fire-Base1"
 names(case_desc) = c("1","2","3","4","5","6","7","8")
 
 trait_file  = file.path(main_path,"global-varying-params.csv")
-param_file  = file.path(main_path,"fates_Fireonparams.nc")
+param_file  = file.path(fireon_path,"fates_site_fireon.nc")
 #obs path
 obs_main    = file.path("~/Google Drive/My Drive/CA-grassland-simulationDoc/benchmark")
 site_main   = file.path(obs_main,"Vaira-Ranch-AGB-LAI")
@@ -86,8 +86,10 @@ seablm_path = file.path(seablm_main,"nutnet-npp-div-data-output.csv")
 flux_path   = file.path(site_main,flux_base)
 agb_path    = file.path(site_main,agb_base)
 lai_path    = file.path(site_main,lai_base)
-frap_grass  = file.path(frap_main,"Bfrac-WRF-grassonly.csv")
+frap_grass_wrf  = file.path(frap_main,"Bfrac-WRF-grassonly_FRAP.csv")
+#frap_grass  = file.path(frap_main,"Burnedfractionbycell.csv")
 frap_site   = file.path(frap_main,"site-nearest-fire.csv")
+frap_raw    = file.path(obs_main,"CA-grassfire-climate/fire20_1.gdb")
 
 ```
 
@@ -134,8 +136,9 @@ dummy = dir.create(sens_path   , recursive = TRUE, showWarnings = FALSE)
 
 
 
-```{r,label="user-pft"}
-user_pftinfo = TRUE
+```{r,label="user-pft-fuel"}
+user_pftinfo  = TRUE
+user_fuelinfo = TRUE
 
 # List of PFTs, in case user_pftinfo is TRUE
 n            = 0
@@ -147,7 +150,56 @@ pftinfo[[n]] = list( id     = 1
                    , desc   = "C3 drought decid grass"
                    , colour = "#00BFC4"
                    , parse  ="D*e*c*i*d[Non-h*y*d*r*o]"
-                   )#end list
+                   )#end of PFT list
+
+
+# List of fuels, in case user_fuleinfo is TRUE
+n               = 0
+fuelinfo        = list()
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 1
+                      , key     = "fuel1"
+                      , short   = "Twig"
+                      , desc    = "Fuel from twig" 
+                      , colour  = "#E69F00"
+                      , parse   = "F*u*e*l[T*w*i*g]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 2
+                      , key     = "fuel2"
+                      , short   = "SBranch"
+                      , desc    = "Fuel from small branch" 
+                      , colour  = "#56B4E9"
+                      , parse   = "F*u*e*l[S*b*r*a*n*c*h]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 3
+                      , key     = "fuel3"
+                      , short   = "LBranch"
+                      , desc    = "Fuel from large branch" 
+                      , colour  = "#0072B2"
+                      , parse   = "F*u*e*l[L*b*r*a*n*c*h]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 4
+                      , key     = "fuel4"
+                      , short   = "Trunk"
+                      , desc    = "Fuel from trunk" 
+                      , colour  = "#D55E00"
+                      , parse   = "F*u*e*l[T*r*u*n*k]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 5
+                      , key     = "fuel5"
+                      , short   = "DeadLeaf"
+                      , desc    = "Fuel from dead leaf" 
+                      , colour  = "#999999"
+                      , parse   = "F*u*e*l[D*l*e*a*f]")
+n               = n + 1
+fuelinfo[[n]]   = list( id      = 6
+                      , key     = "fuel6"
+                      , short   = "LiveGrass"
+                      , desc    = "Fuel from live grass" 
+                      , colour  = "#009E73"
+                      , parse   = "F*u*e*l[L*g*r*a*s*s]") #end of fuel list
+
+
 
 ```
 
@@ -158,7 +210,7 @@ pftinfo[[n]] = list( id     = 1
 
 ```{r,label="plot-setting"}
 
-gg_device  = c("pdf")     # Output devices to use (Check ggsave for acceptable formats)
+gg_device  = c("tiff")     # Output devices to use (Check ggsave for acceptable formats)
 gg_depth   = 600          # Plot resolution (dpi)
 gg_ptsz    = 18           # Font size
 gg_ptszl   = 26
@@ -240,6 +292,7 @@ ens_labels = paste0(nodekeys,"-",taskeys)
 nc_conn      = nc_open(case_files[1])
 time_val     = ncvar_get(nc_conn,"time")
 time_use     = time_val[181:432] #only retrieve values for years during 2000-2020
+simu_time    = c(2000:2020)
 model_yra    = 1985
 n_yr         = round((tail(time_use,1)-head(time_use,1))/365,digits=0)
 yr_start     = model_yra + floor(time_use[1]/365)
@@ -378,6 +431,37 @@ if (! is.finite(idxpft)){
 # Set number of PFTs (active PFTs only) 
 npfts = nrow(pftinfo)
 
+# List of fuel classes
+
+idxfuel   = match("fates_levfuel",nc_dlist)
+if (! is.finite(idxfuel)){
+   # fuel index not found. Skip Fuels altogether.
+   fuelinfo = tibble( id               = numeric(0L)
+                    , key              = character(0L)
+                    , short            = character(0L)
+                    , desc             = character(0L)
+                    , colour           = character(0L)
+                    , stringsAsFactors = FALSE
+                    )#end data.table
+}else if (! user_fuelinfo){
+   # Select all fuels available
+   fuelids  = nc_conn$dim[[idxfuel]]$vals
+   nfuelids = nc_conn$dim[[idxfuel]]$len
+
+   # Build tibble with all the fuels.
+   fuelinfo = tibble( id               = fuelids
+                    , key              = sprintf("Fuel %2.2i" ,fuelids)
+                    , short            = sprintf("Fuel %2.2i" ,fuelids)
+                    , desc             = sprintf("Fuel %2.2i" ,fuelids)
+                    , colour           = brewer.pal(n=nfuelids,name="PuBuGn")
+                    , stringsAsFactors = FALSE
+                   )#end tibble
+}else if (! is_tibble(fuelinfo)){
+   # Convert user-defined fuelinfo to a "tibble" object
+   fuelinfo  = do.call(what=rbind,args=lapply(X=fuelinfo,FUN=as_tibble,stringsAsFactors=FALSE))
+}#end if (! is.finite(idxfuel))
+nfuels = nrow(fuelinfo)
+
 # List of soil layer
 idxsoi   = match("levgrnd",nc_dlist)
 if (is.finite(idxsoi)){
@@ -471,7 +555,13 @@ for (v in which(fatesvar$is_upc)){
 nbypft    = length(nc_bypft)
 n_varpft_last = sum(varpft_last)
 
-
+# by fuel class
+nc_byfuel = nc_vlist[grepl(pattern="_FC$",x=nc_vlist)]
+nc_pref   = tolower(gsub(pattern="_FC$",replacement="",x=nc_byfuel))
+nc_keep   = nc_pref %in% fatesvar$vnam & (! duplicated(nc_pref))
+no_byfuel = nc_byfuel[! nc_keep]
+nc_byfuel = nc_byfuel[  nc_keep]
+nbyfuel   = length(nc_byfuel)
 
 #---~---
 #    Retrieve all "drought deciduous phenology variables
@@ -551,7 +641,6 @@ for(c in sequence(ncase)){
 
 # by pft
 
-
 bypft = list()
 for(c in sequence(ncase)){
   case     = as.character(case_names[c])
@@ -568,6 +657,20 @@ for(c in sequence(ncase)){
   } # end of p
 }
 
+# Initialize list of variables by fuel class
+
+byfuel = list()
+for(c in sequence(ncase)){
+  case     = as.character(case_names[c])
+  
+  for(f in sequence(nbyfuel)){
+  nc_nvnow                   = nc_byfuel[f]
+  nc_pref                    = tolower(gsub(pattern="_FC$",replacement="",x=nc_nvnow))
+  f                          = match(nc_pref,fatesvar$vnam)
+  f_vnam                     = fatesvar$vnam[f]
+  byfuel[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp_each*ninst,ncol=nfuels,dimnames=list(NULL,fuelinfo$key)) 
+  } #end of a loop
+} #end of c(in sequence(ncase))
 
 
 # Initialise list of variables by soil layer
@@ -686,7 +789,7 @@ for(c in sequence(ncase)){
     nc_dat              = nc_dat[,181:432,] 
    #reform the 3d array so when convert to matrix, rows are time by ensemble members, columns are age class 
     ncm_dat             = aperm(nc_dat, c(2,3,1)) 
-    dim(ncm_dat)        = c(ninst*ntstamp_each, nages)
+    dim(ncm_dat)        = c(ninst*ntstamp_each,nages)
     nc_dat              = f_add0 + f_mult * ncm_dat
     byage[[case]][[f_vnam]][,]   = nc_dat
 }#end for (a in sequence(nbyage))  
@@ -768,6 +871,25 @@ for(c in sequence(ncase)){
   # Aggregate data
    bypft[[case]][[v_vnam]] = bypft[[case]][[v_vund]] + bypft[[case]][[v_vcan]]
    }#end for (v in which(varpft_last))
+  
+
+   # Read variables by fuel class, and assign current values to the matrix.  
+  for (f in sequence(nbyfuel)){
+    nc_nvnow            = nc_byfuel[f]
+    nc_pref             = tolower(gsub(pattern="_FC$",replacement="",x=nc_nvnow))
+    f                   = match(nc_pref,fatesvar$vnam)
+    f_vnam              = fatesvar$vnam[f]
+    f_add0              = eval(parse(text=fatesvar$add0[f]))
+    f_mult              = eval(parse(text=fatesvar$mult[f]))
+    nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen = TRUE)
+   #subset time to only include results from 2000 to 2020
+    nc_dat              = nc_dat[,181:432,] 
+   #reform the 3d array so when convert to matrix, rows are time by ensemble members, columns are fuel class 
+    ncm_dat             = aperm(nc_dat, c(2,3,1)) 
+    dim(ncm_dat)        = c(ninst*ntstamp_each, nfuels)
+    nc_dat              = f_add0 + f_mult * ncm_dat
+    byfuel[[case]][[f_vnam]][,]   = nc_dat
+}#end for (f in sequence(nbyfuel))  
 
 
  # Read drought-deciduous phenology variables (by PFT), and assign current values to the matrix.
@@ -1004,6 +1126,44 @@ bypft = pft_melt
 rm(pft_melt)
 invisible(gc())
 
+cat0(" + Turn fuel-class matrices into tibble objects.")
+fuel_melt  = NULL
+
+for (c in sequence(ncase)){
+  case = case_names[c]
+  now_fuelmelt = NULL
+  for (u in sequence(nbyfuel)){
+   #--- Match variables.
+  f        = match(names(byfuel[[case]])[u],fatesvar$vnam)
+  f_vnam   = fatesvar$vnam[f]
+  f_desc   = fatesvar$desc[f]
+  cat0("   - ",f_desc,".")
+      
+#--- Create molten data table for this variable.  
+  now_fuel            = as_tibble(byfuel[[case]][[f_vnam]])
+  now_fuel$time       = rep(each_tstamp, time=ninst)
+  now_fuel$case       = rep_along(time, x = case)
+  now_fuel$ens_label  = rep(ens_labels, each = ntstamp_each)
+  now_melt            = as_tibble(reshape2::melt(data=now_fuel,id.vars=c("case","ens_label",       
+                              "time"),variable.name="fuel",value.name=f_vnam))
+      #--- Merge data table
+  
+  if (is.null(now_fuelmelt)){
+    now_fuelmelt = now_melt
+  }else{
+        now_fuelmelt = as_tibble(merge(x=now_fuelmelt,y=now_melt,by=c("case","ens_label","time","fuel"),all=TRUE))
+  }#end if (is.null(age_melt))
+  
+  }#end for (a in sequence(nbyage))
+fuel_melt = rbind(fuel_melt,now_fuelmelt)
+}
+
+
+
+byfuel = fuel_melt 
+rm(fuel_melt)
+invisible(gc())
+
 # Turn drought-deciduous phenology variables into data tables
 if (! is_tibble(dphen)){
    cat0(" + Turn drought-deciduous phenology matrices into data tables.")
@@ -1083,14 +1243,16 @@ dphen$pft = as.integer(dphen$pft)
 bysoi$soi = as.integer(bysoi$soi)
 
 ## write out tables so can use later
-#fwrite(byage,file.path(main_path,paste0("allcaseFireon_byage.csv")))
-#fwrite(bypft,file.path(main_path,paste0("allcaseFireon_bypft.csv")))
-#fwrite(dphen,file.path(main_path,paste0("allcaseFireon_dphen.csv")))
-#fwrite(bysoi,file.path(main_path,paste0("allcaseFireon_bysoi.csv")))
-#fwrite(hlm1d,file.path(main_path,paste0("allcaseFireon_hlm1d.csv")))
+#fwrite(byage,file.path(fireon_path,paste0("allcaseFireon_byage.csv")))
+#fwrite(bypft,file.path(fireon_path,paste0("allcaseFireon_bypft.csv")))
+#fwrite(dphen,file.path(fireon_path,paste0("allcaseFireon_dphen.csv")))
+#fwrite(bysoi,file.path(fireon_path,paste0("allcaseFireon_bysoi.csv")))
+#fwrite(hlm1d,file.path(fireon_path,paste0("allcaseFireon_hlm1d.csv")))
+#fwrite(byfuel,file.path(fireon_path,paste0("allcaseFireon_byfuel.csv")))
 
-bypft = fread(file.path(main_path,"allcaseFireon_bypft.csv"))
-hlm1d = fread(file.path(main_path,"allcaseFireon_hlm1d.csv"))
+bypft  = fread(file.path(fireon_path,"allcaseFireon_bypft.csv"))
+hlm1d  = fread(file.path(fireon_path,"allcaseFireon_hlm1d.csv"))
+byfuel = fread(file.path(fireon_path,"allcaseFireon_byfuel.csv"))
 
 ```
 
@@ -1103,7 +1265,7 @@ hlm1d = fread(file.path(main_path,"allcaseFireon_hlm1d.csv"))
 
 
 
-```{r, label="retrive-global-params-for-ensembles",message=FALSE,results='hide'}
+```{r,label="retrive-global-params-for-ensembles", results='hide'}
 
 nc_conn              = nc_open(param_file)
 param_config         = fread(trait_file)
@@ -1112,7 +1274,9 @@ param_config$org_var = is.finite(param_config$org)
 param_config$pft_all = param_config$pft_var & (param_config$pft=="0")
 param_config$org_all = param_config$org_var & (param_config$org=="0")
 #as the first set of ensembles do not change fire-related parameters, we exclude these
-p_vlist  = param_config$uniq_name[grepl(pattern="fire",param_config$uniq_name)]
+p_fire    = param_config %>% filter(experiment %in% c("both","fire_on"))
+p_vlist   = p_fire$uniq_name
+
 np       = length(p_vlist)
 
 
@@ -1390,6 +1554,7 @@ survi_label = unique(survi_ens$case_ens[survi_ens$survi])
 
 
 mortout    = names(bypft)[grep(pattern="mortality",x=names(bypft))]
+
 find_mort = function(x,n){
    mort_mon = ifelse( test = n == 0, yes = 0., no = pmin(1.,x/n/12.))
    mort_year = 100. * (1. - (1. - mort_mon)^12)
@@ -1401,14 +1566,14 @@ survi_ens  = bypft                                              %>%
              filter(case_ens %in% survi_label)                  %>% 
              mutate(month = month(time)
                    ,year  = year(time))                         %>% 
-             mutate_at(all_of(mortout),
+             mutate_at(c(mortout),
                        ~ find_mort(x=.x,n=.data$fates_nplant))
 
 all_ens    = bypft                                           %>% 
              mutate(case_ens = paste0(case,"_",ens_label)
                    ,month = month(time)
                    ,year  = year(time))                      %>% 
-             mutate_at(all_of(mortout)
+             mutate_at(c(mortout)
                       ,~ find_mort(x=.x,n=.data$fates_nplant))
   
 
@@ -1550,6 +1715,8 @@ for (c in sequence(ncase)){
 }
 
 ```
+
+
 
 
 
@@ -1700,6 +1867,9 @@ mmean_com = mmean_com %>% arrange(case,ens_label,month)
 
 
 
+
+
+
 ```{r,label="seasonal-dynamic"}
 cat0(" + Plot monthly mean of variables.")
 
@@ -1727,7 +1897,7 @@ for (h in emean_loop){
    gg_now = ggplot(data=mmean_now)
    gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))
    gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,group="ens_label",color="'Model'")
-                              ,lwd=0.1,alpha=0.8,show.legend=TRUE)
+                              ,lwd=0.5,alpha=0.8,show.legend=TRUE)
    gg_now = gg_now + geom_line(data=obs
                               ,aes_string(x="month",y=h_vnam,color="'Site'")
                               ,show.legend = TRUE)
@@ -1744,7 +1914,7 @@ for (h in emean_loop){
    gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
    gg_now = gg_now + xlab(element_blank())
    gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
-   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
    gg_now = gg_now + theme( legend.position   = "right"
                          , legend.text=element_text(size=gg_ptsz)
                          , axis.text.x        = element_text( size   = gg_ptsz
@@ -1763,10 +1933,10 @@ for (h in emean_loop){
                     , plot     = gg_now
                     , device   = gg_device[d]
                     , path     = secy_path
-                    , width    = gg_width
+                    , width    = gg_widthn
                     , height   = gg_height
                     , units    = gg_units
-                    , dpi      = gg_depth
+                    #, dpi      = gg_depth
                     )
    }
   gg_emean[[h_vnam]] = gg_now      
@@ -1785,45 +1955,121 @@ if (gg_screen) gg_emean
 
 
 
-```{r,label="plot-monthly-mean-fire"}
+```{r,label="plot-monthly-mean-fire-variables"}
 
 fire_vars = c("fates_burnfrac","fates_fdi","fates_ros",
               "fates_fuel_amount","fates_fuel_bulkd")
 
-fire_mmean = hlm1d                                                 %>% 
-             select(all_of(c("case","ens_label","time",fire_vars)))%>% 
-             mutate(case_ens = paste0(case,"_",ens_label)
-                   , month = month(time))                          %>% 
-             group_by(case,ens_label,case_ens,month)               %>% 
+fire_cmean = hlm1d                                                 %>% 
+             select(all_of(c("case","time",fire_vars)))            %>% 
+             mutate(month = month(time))                           %>% 
+             group_by(case,month)                                  %>% 
              dplyr::select(-time)                                  %>% 
              summarize_all(mean,na.rm=TRUE)                        %>% 
              ungroup()
+
+fire_qupr  = hlm1d                                                 %>% 
+             select(c("case","time",fire_vars))                    %>%
+             mutate(month = month(time))                           %>% 
+             group_by(case,month)                                  %>%
+             dplyr::select(-time)                                  %>% 
+             summarize_all(quantile,probs=qupr_ribbon,names=FALSE
+                          , na.rm=TRUE)                            %>% 
+             ungroup()                                             %>% 
+             rename_at(all_of(fire_vars),function(x) paste0(x,"_qupr"))
+
+fire_qlwr  = hlm1d                                                 %>% 
+             select(c("case","time",fire_vars))                    %>%
+             mutate(month = month(time))                           %>% 
+             group_by(case,month)                                  %>%
+             dplyr::select(-time)                                  %>% 
+             summarize_all(quantile,probs=qlwr_ribbon,names=FALSE
+                          , na.rm=TRUE)                            %>% 
+             ungroup()                                             %>% 
+             rename_at(all_of(fire_vars),function(x) paste0(x,"_qlwr"))
+
+fire_cmean  = merge(x=fire_cmean,y=merge(x=fire_qupr,y=fire_qlwr,by=c("case","month")),
+                    by=c("case","month"))
+fire_cmean = fire_cmean %>% arrange(case,month)
+
+##1. observed seasonal variations in burned area of lightning-caused fires in California
+layers      = st_layers(dsn=frap_raw) 
+wldfire     = st_read(frap_raw, layer = layers$name[1])
+wldfire     = wldfire                                    %>% 
+              filter(CAUSE==1)                           %>% 
+              dplyr::select(YEAR_,ALARM_DATE,Shape_Area) %>% 
+              mutate(month=month(ALARM_DATE)
+                    ,case=0)                             %>% 
+              as.data.frame()                            %>% 
+              dplyr::select(-Shape)                      %>% 
+              group_by(case,month)                       %>% 
+              summarize(fates_burnfrac = mean(Shape_Area,na.rm=TRUE)
+                       ,fates_burnfrac_qupr = quantile(Shape_Area,probs=qupr_ribbon,names=FALSE, na.rm=TRUE)
+                       ,fates_burnfrac_qlwr = quantile(Shape_Area,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE)) %>% 
+              filter(!is.na(month)) %>% ungroup()
+ba_df      = fire_cmean %>% dplyr::select(case,month,fates_burnfrac,fates_burnfrac_qupr,fates_burnfrac_qlwr) 
+ba_df      = rbind(wldfire,ba_df) %>% arrange(case,month)
+
+# 2. Observed monthly burned fraction across CA grasslands 
+bf_grass  = fread(frap_grass_wrf)
+bfam_grass  = bf_grass                                               %>% 
+            mutate(case=0)                                           %>% 
+            group_by(case,Month)                                     %>% 
+            summarize(fates_burnfrac = sum(BurnedFrac,na.rm=TRUE))   %>% 
+                     #,fates_burnfrac_qupr = quantile(BurnedFrac,probs=qupr_ribbon,names=FALSE, na.rm=TRUE)
+                     #,fates_burnfrac_qlwr = quantile(BurnedFrac,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE)) %>% 
+            mutate(fates_burnfrac = fates_burnfrac/749)              %>% 
+            ungroup() %>% rename(month = Month)
+grass_fire = fire_cmean %>% dplyr::select(case,month,fates_burnfrac,fates_burnfrac_qupr,fates_burnfrac_qlwr) 
+grass_fire = rbind(bfam_grass,grass_fire) %>% arrange(case,month)
+
+
+fire_mmean  = hlm1d                                                 %>% 
+              select(all_of(c("case","ens_label","time",fire_vars)))%>% 
+              mutate(month = month(time))                           %>% 
+              group_by(case,ens_label,month)                        %>% 
+              dplyr::select(-time)                                  %>% 
+              summarize_all(mean,na.rm=TRUE)                        %>% 
+              ungroup()
              
-  
-fire_loop = which(hlm1dvar$vnam %in% fire_vars)
+plot_fire = "fates_burnfrac"
+fire_loop = which(hlm1dvar$vnam %in% plot_fire)
 gg_fire   = list()
+tf        = 40
 for(h in fire_loop){
    h_vnam   = hlm1dvar$vnam[h] 
    h_desc   = hlm1dvar$desc [h]
    h_short  = hlm1dvar$short[h]
    h_unit   = hlm1dvar$unit [h]
+   h_vqlwr  = paste0(h_vnam,"_qlwr")
+   h_vqupr  = paste0(h_vnam,"_qupr")
    h_legend = v == 1
    cat0("   - ",h_desc,".")
 
-  fire_now        = fire_mmean
-   #mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
+   fire_now        = fire_cmean
+   #fire_now        = grass_fire
+   fire_now$case   = factor(fire_now$case,levels=unique(fire_now$case))
    
-   gg_now = ggplot(data=fire_now)
-   gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))
-   gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,group="ens_label",color="'Model'")
-                              ,lwd=0.1,alpha=0.8,show.legend=TRUE)
+   gg_now = ggplot(fire_now,aes(x=month))
+   gg_now = gg_now + geom_line(aes_string(y=h_vnam,colour="case")
+                              ,lwd=0.5,alpha=1,show.legend=TRUE)
+   gg_now = gg_now + geom_line(data=bfam_grass,aes(y=fates_burnfrac / tf),
+                               show.legend=FALSE,color="black")
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",values=top12,labels=case_desc)
+   gg_now = gg_now + geom_ribbon( data = fire_now 
+                                , aes_string(x = "month",ymin=h_vqlwr,ymax=h_vqupr,fill="case")
+                                , alpha       = alpha_ribbon*0.5
+                                , show.legend = h_legend
+                                )
+   gg_now = gg_now + scale_fill_manual(name="",values=top12,labels=case_desc)
+
+   gg_now = gg_now + scale_y_continuous(name=desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE),
+                                        sec.axis = sec_axis(~.*tf,name=expression("FRAP"~"["*m^2*"]")))
    
-   gg_now = gg_now + scale_colour_manual(name=""
-                                        ,values=c("Model"= ens_colour[1]))
    gg_now = gg_now + labs(title=h_desc)
    gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
    gg_now = gg_now + xlab(element_blank())
-   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   #gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
    gg_now = gg_now + theme( legend.position   = "right"
                          , legend.text=element_text(size=gg_ptsz)
@@ -1843,10 +2089,10 @@ for(h in fire_loop){
                     , plot      = gg_now
                     , device    = gg_device[d]
                     , path      = secy_path
-                    , width     = gg_width
-                    , height    = gg_height
+                    , width     = gg_widthn*0.75
+                    , height    = gg_height*0.75
                     , units     = gg_units
-                    , dpi       = gg_depth
+                    #, dpi       = gg_depth
                     )
    }
   gg_fire[[h_vnam]] = gg_now      
@@ -1865,90 +2111,81 @@ if (gg_screen) gg_fire
 
 
 
-```{r,label="plot-top10-survived",message=FALSE,fig.width=8,fig.height=10}
 
-top_ten = all_ens                                                          %>% 
-          group_by(case)                                                   %>% 
-          arrange(desc(fates_lai,fates_gpp,fates_vegc_aboveground))        %>% 
-          filter(ens_label %in% unique(ens_label)[1:10])                   %>% 
-          arrange(case,ens_label)                                          %>% 
-          ungroup()                                                        %>% 
-          mutate(case_ens = paste0(case,"_",ens_label))
+```{r,label="plot-allometry-effects",message=FALSE,fig.width=8,fig.height=10}
 
-top_10labels = unique(top_ten$case_ens)
-top10_mmean  = mmean_com                                                      %>% 
-               mutate(case_ens = paste0(case,"_",ens_label))                  %>% 
-               filter(case_ens %in% c(top_10labels,"0_Site"))                 %>% 
-               arrange(case,ens_label,case_ens)                                      
+fire_month = c("6","7","8","9","10")
 
-cat0(" + Plot monthly mean of variables for top10 survived ensembles.")
+fire_allom = hlm1d                                                 %>% 
+             select(c("case","ens_label","time",fire_vars))        %>% 
+             mutate(case_ens = paste0(case,"_",ens_label)
+                   , month = month(time))                          %>% 
+             filter(month %in% fire_month)                         %>% 
+             group_by(case,ens_label,case_ens)                     %>% 
+             dplyr::select(-c(time,month))                         %>% 
+             summarize_all(mean,na.rm=TRUE)                        %>% 
+             ungroup()
 
-leg_colours = c(site_colour,top12[1:10])
-
-mmean_plot  = top10_mmean 
-emean_loop = which(hlm1dvar$vnam %in% hlm_var)
-
-gg_emean   = list()
-for(c in sequence(ncase)){
-  case_now  = case_names[c]
-  desc_now  = case_desc[c]
-  mmean_now = mmean_plot                                                     %>% 
-              filter(case %in% c(0,case_now))                                %>% 
-              mutate(ens_label = factor(ens_label,levels=unique(ens_label))) 
-              
-  leg_labels = unique(mmean_now$ens_label)
-  
-  for (h in emean_loop){
+fire_loop = which(hlm1dvar$vnam %in% fire_vars)
+gg_fire   = list()
+for(h in fire_loop){
    h_vnam   = hlm1dvar$vnam[h] 
    h_desc   = hlm1dvar$desc [h]
    h_short  = hlm1dvar$short[h]
    h_unit   = hlm1dvar$unit [h]
-   h_legend = v == 1
+   h_legend =  1
    cat0("   - ",h_desc,".")
 
-  
-  #mmean_now$source = factor(mmean_now$source,levels=unique(mmean_now$source))
-  
-   gg_now = ggplot(data=mmean_now,aes_string(x="month",y=h_vnam,colour="ens_label"))
-   gg_now = gg_now + geom_line(lwd=1,show.legend = TRUE)
-   gg_now = gg_now + scale_colour_manual(name=desc_now,aesthetics="colour",labels = leg_labels,values=leg_colours)
+  fire_now        = fire_allom
+  fire_now$case = factor(fire_now$case,levels=unique(fire_now$case))
+   
+   gg_now = ggplot(data=fire_now)
+   gg_now = gg_now + geom_boxplot(aes_string(x="case",y=h_vnam,color="case")
+                                 ,show.legend=TRUE)
+   
+   gg_now = gg_now + scale_colour_manual(name=""
+                                        ,labels=case_desc
+                                        ,values=top12)
+   if( h_vnam == "fates_fuel_amount"){
+     gg_now = gg_now + geom_hline(aes(yintercept = 0.6),color = "black",linetype='dashed')
+     gg_now = gg_now + geom_hline(aes(yintercept = 0.26), color="black",linetype="dashed")
+     #gg_now = gg_now + geom_rect(aes(xmin =-Inf, xmax=Inf, x=NULL, ymin=0.26,ymax=0.6),alpha=0.1,fill="grey")
+   }
    gg_now = gg_now + labs(title=h_desc)
-   gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
    gg_now = gg_now + xlab(element_blank())
    gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
-   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
    gg_now = gg_now + theme( legend.position   = "right"
                          , legend.text=element_text(size=gg_ptsz)
-                         , axis.text.x        = element_text( size   = gg_ptsz
-                                                           , margin = unit(rep(0.35,times=4),"cm"))#end element_text
-                         , axis.text.y        = element_text( size   = gg_ptsz
+                         , axis.text.x        = element_blank( )
+                         , axis.text.y       = element_text( size   = gg_ptsz
                                                            , margin = unit(rep(0.35,times=4),"cm")
                                                            )#end element_text
-                         , axis.ticks.length  = unit(-0.25,"cm")
+                         , axis.ticks.length = unit(-0.25,"cm")
                          ) #end theme
   
  
    # Save plots.
    for (d in sequence(ndevice)){
-    h_output = paste0(h_vnam,desc_now,"_top10.",gg_device[d])
+    h_output = paste0(h_vnam,"_allomgroup.",gg_device[d])
     dummy    = ggsave( filename = h_output
-                    , plot     = gg_now
-                    , device   = gg_device[d]
-                    , path     = secy_path
-                    , width    = gg_width
-                    , height   = gg_height
-                    , units    = gg_units
-                    , dpi      = gg_depth
+                    , plot      = gg_now
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_widthn
+                    , height    = gg_height
+                    , units     = gg_units
+                    #, dpi       = gg_depth
                     )
    }
-  gg_emean[[desc_now]][[h_vnam]] = gg_now      
+  gg_fire[[h_vnam]] = gg_now      
 
 }
-  
-}
+
 
 # If sought, plot images on screen
-if (gg_screen) gg_emean
+if (gg_screen) gg_fire
+
 
 
 
@@ -1961,233 +2198,6 @@ if (gg_screen) gg_emean
 
 
 
-
-```{r,label="parameter-distribution-top10",fig.width=10,fig.height=8}
-
-top10_par = param_survi                          %>% 
-            filter(case_ens %in% top_10labels)
-for(c in sequence(ncase)){
-  case_now = case_names[c]
-  desc_now = case_desc[c]
-  his_df   = top10_par %>% filter(case == case_now)
-  f_output = paste0(desc_now,"_top10parHist.png")
-  
-  png(file=file.path(plot_main,f_output)
-     ,width=10,height=8,units="in",res=600)
-  Hmisc::hist.data.frame(top10_par[c(1:2,4:21)])
-  dev.off()
-}
-
-
-```
-
-
-
-
-
-
-
-
-
-
-```{r,label="plot-mortality-topten",message=FALSE,results='hide',fig.width=10, fig.height=7.5}
-
-# Select mortality type variables, ensure all of them are present.
-mort_out       = names(bypft)[grepl(pattern="_mortality_",x=names(bypft))]
-mortvar        = fatesvar[fatesvar$vtype %in% "mort",]
-mortvar        = mortvar[order(mortvar$order),,drop=FALSE]
-mortvar        = mortvar[mortvar$vnam %in% mort_out,]
-mortvar$desc   = gsub(pattern="Mortality rate \\(",replacement="",x=mortvar$desc)
-mortvar$desc   = gsub(pattern="\\)"               ,replacement="",x=mortvar$desc)
-nmorts         = nrow(mortvar)
-#plot_mort_dbh  = all(c(mortvar$vnam,"fates_nplant") %in% names(bydbh))
-plot_mort_dbh  = FALSE
-plot_top10     = TRUE
-plot_mort_pft  = all(c(mortvar$vnam,"fates_nplant") %in% names(bypft))
-mort_bypft     = bypft
-
-
-# Function to convert change rate into mortality rate, by accounting for the non-linearity across multiple time scales.
-find_mort = function(x,n){
-   mort_mon = ifelse( test = n == 0, yes = 0., no = pmin(1.,x/n/12.))
-   mort_year = 100. * (1. - (1. - mort_mon)^12)
-   return(mort_year)
-}#end function find_mort
-
-
-
-for (c in sequence(ncase)){
-    case_now = case_names[c]
-    desc_now = case_desc[c]
-    if (plot_top10){
-  
-   # Re-order mortality so it becomes all in one tibble.
-   mortens = top_ten                                                                     %>% 
-             filter(case==case_now)                                                      %>% 
-             select_at(all_of(c("case","ens_label","pft","time",mortvar$vnam)))          %>%
-             pivot_longer(cols=mortvar$vnam,names_to="mtype",values_to="mortality")      %>%
-             mutate( mtype = factor(mortvar$desc[match(mtype,mortvar$vnam)],levels=mortvar$desc ))
-                   #, pft   = factor(pftinfo$parse[match(pft,pftinfo$id)]   ,levels=pftinfo$parse) )
-
-   # Initialise plot (decide whether to plot lines or stacks).
-   gg_mten = ggplot(data=mortens,aes(x=time,y=mortality,group=mtype,fill=mtype))
-   gg_mten = gg_mten + facet_wrap(.~ ens_label, ncol = 3)
-   gg_mten = gg_mten + scale_fill_manual(name="Mortality type",labels=mortvar$desc,values=mortvar$colour)
-   gg_mten = gg_mten + geom_area(position=position_stack(reverse = FALSE),show.legend = TRUE)
-   gg_mten = gg_mten + labs(title=desc_now)
-   gg_mten = gg_mten + scale_x_datetime(date_labels=gg_tfmt)
-   gg_mten = gg_mten + scale_y_continuous(trans="sqrt",n.breaks=10,labels=label_number_auto())
-   gg_mten = gg_mten + xlab("Simulation time")
-   gg_mten = gg_mten + ylab(desc.unit(desc="Mortality rate",unit=untab$pcoyr,twolines=TRUE))
-   gg_mten = gg_mten + theme_grey( base_size = gg_ptsz*2, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
-   gg_mten = gg_mten + theme( axis.text.x       = element_text( size   = gg_ptsz
-                                                              , margin = unit(rep(0.35,times=4),"cm")
-                                                              )#end element_text
-                            , axis.text.y       = element_text( size   = gg_ptsz
-                                                              , margin = unit(rep(0.35,times=4),"cm")
-                                                              )#end element_text
-                            , axis.ticks.length = unit(-0.25,"cm")
-                            , legend.position   = "bottom"
-                            , legend.direction  = "horizontal"
-                            )#end theme
-
-   # Save plots.
-   for (d in sequence(ndevice)){
-      m_output = paste0("mort-top10-",desc_now,".",gg_device[d])
-      dummy    = ggsave( filename = m_output
-                       , plot     = gg_mten
-                       , device   = gg_device[d]
-                       , path     = tsmort_path
-                       , width    = gg_width*2
-                       , height   = gg_height*2.5
-                       , units    = gg_units
-                       , dpi      = gg_depth
-                       )#end ggsave
-
-   }#end for (d in sequence(ndevice))
-
-   # If sought, plot images on screen
-   if (gg_screen) gg_mten
-
-}#end if (plot_mort_pft)
-
-
-# In case we are to plot mortality by type and PFT, reorganise mortality data.
-if (plot_mort_pft){
-   # Re-order mortality so it becomes all in one tibble.
-   mortens = mort_bypft                                                              %>% 
-             filter(case == case_now)                                                %>% 
-             mutate_at(all_of(mortvar$vnam), ~ find_mort(x=.x,n=.data$fates_nplant)) %>%
-             select_at(all_of(c("case","ens_label","pft","time",mortvar$vnam))) %>%
-             pivot_longer(cols=mortvar$vnam,names_to="mtype",values_to="mortality") %>%
-             mutate( mtype = factor(mortvar$desc[match(mtype,mortvar$vnam)],levels=mortvar$desc )
-                   , pft   = factor(pftinfo$parse[match(pft,pftinfo$id)]   ,levels=pftinfo$parse) )
-  ens_mark = unique(mortens$ens_label)[9] #chose 1 to plot
-  mortens_sub = mortens %>% filter(ens_label %in% ens_mark)
-
-   # Initialise plot (decide whether to plot lines or stacks).
-   gg_mpft = ggplot(data=mortens_sub,aes(x=time,y=mortality,group=mtype,fill=mtype))
-   gg_mpft = gg_mpft + facet_wrap(.~ pft, ncol = 2,labeller = label_parsed)
-   gg_mpft = gg_mpft + scale_fill_manual(name="Mortality type",labels=mortvar$desc,values=mortvar$colour)
-   gg_mpft = gg_mpft + geom_area(position=position_stack(reverse = FALSE),show.legend = TRUE)
-   gg_mpft = gg_mpft + labs(title=desc_now)
-   gg_mpft = gg_mpft + scale_x_datetime(date_labels=gg_tfmt)
-   gg_mpft = gg_mpft + scale_y_continuous(trans="sqrt",n.breaks=10,labels=label_number_auto())
-   gg_mpft = gg_mpft + xlab("Simulation time")
-   gg_mpft = gg_mpft + ylab(desc.unit(desc="Mortality rate",unit=untab$pcoyr,twolines=TRUE))
-   gg_mpft = gg_mpft + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
-   gg_mpft = gg_mpft + theme( axis.text.x       = element_text( size   = gg_ptsz
-                                                              , margin = unit(rep(0.35,times=4),"cm")
-                                                              )#end element_text
-                            , axis.text.y       = element_text( size   = gg_ptsz
-                                                              , margin = unit(rep(0.35,times=4),"cm")
-                                                              )#end element_text
-                            , axis.ticks.length = unit(-0.25,"cm")
-                            , legend.position   = "bottom"
-                            , legend.direction  = "horizontal"
-                            )#end theme
-
-   # Save plots.
-   for (d in sequence(ndevice)){
-      m_output = paste0("mort-bypft-",desc_now,".",gg_device[d])
-      dummy    = ggsave( filename = m_output
-                       , plot     = gg_mpft
-                       , device   = gg_device[d]
-                       , path     = tsmort_path
-                       , width    = gg_width
-                       , height   = gg_height
-                       , units    = gg_units
-                       , dpi      = gg_depth
-                       )#end ggsave
-
-   }#end for (d in sequence(ndevice))
-
-   # If sought, plot images on screen
-   if (gg_screen) gg_mpft
-
-}#end if (plot_mort_pft)
-
-
-# In case we are to plot mortality by type and size(DBH), reorganise mortality data.
-if (plot_mort_dbh){
-   # Re-order mortality so it becomes all in one tibble.
-   mortdbh = bydbh %>%
-             filter( dbh != 1 & case == case_now) %>% 
-             mutate_at(all_of(mortvar$vnam), ~ find_mort(x=.x,n=.data$nplant)) %>%
-             select_at(all_of(c("case","ens_label","time","dbh",mortvar$vnam))) %>%
-             pivot_longer(cols=mortvar$vnam,names_to="mtype",values_to="mortality") %>%
-             mutate( mtype = factor(mortvar$desc[match(mtype,mortvar$vnam)],levels=mortvar$desc    )
-                   , dbh   = factor(dbhinfo$desc[match(dbh  ,dbhinfo$id  )],levels=dbhinfo$desc[-1]) )
-
-   # Initialise plot (decide whether to plot lines or stacks).
-   gg_mdbh = ggplot(data=mortdbh,aes(x=time,y=mortality,group=mtype,fill=mtype))
-   gg_mdbh = gg_mdbh + facet_wrap(.~ dbh, ncol = 4, labeller = label_parsed)
-   gg_mdbh = gg_mdbh + scale_fill_manual(name="Mortality type",labels=mortvar$desc,values=mortvar$colour)
-   gg_mdbh = gg_mdbh + geom_area(position=position_stack(reverse = FALSE),show.legend = TRUE)
-   gg_mdbh = gg_mdbh + labs(title=desc_now)
-   gg_mdbh = gg_mdbh + scale_x_datetime(date_labels=gg_tfmt)
-   gg_mdbh = gg_mdbh + scale_y_continuous(trans="sqrt",n.breaks=10,labels=label_number_auto())
-   gg_mdbh = gg_mdbh + xlab("Simulation time")
-   gg_mdbh = gg_mdbh + ylab(desc.unit(desc="Mortality rate",unit=untab$pcoyr,twolines=TRUE))
-   gg_mdbh = gg_mdbh + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
-   gg_mdbh = gg_mdbh + theme( axis.text.x       = element_text( size   = gg_ptsz
-                                                              , margin = unit(rep(0.35,times=4),"cm")
-                                                              )#end element_text
-                            , axis.text.y       = element_text( size   = gg_ptsz
-                                                              , margin = unit(rep(0.35,times=4),"cm")
-                                                              )#end element_text
-                            , plot.title        = element_text( size = gg_ptsz)
-                            , axis.ticks.length = unit(-0.25,"cm")
-                            , legend.position   = "bottom"
-                            , legend.direction  = "horizontal"
-                            )#end theme
-
-   # Save plots.
-   for (d in sequence(ndevice)){
-      m_output = paste0("mort-bydbh-",desc_now,".",gg_device[d])
-      dummy    = ggsave( filename = m_output
-                       , plot     = gg_mdbh
-                       , device   = gg_device[d]
-                       , path     = tsmort_path
-                       , width    = gg_width*2
-                       , height   = gg_height*2
-                       , units    = gg_units
-                       , dpi      = gg_depth
-                       )#end ggsave
-
-   }#end for (d in sequence(ndevice))
-
-   # If sought, plot images on screen
-   if (gg_screen) gg_mdbh
-
-}#end if (plot_mort_dbh)
-
-}# end for(c in sequence(ncase))
-
-
-
-
-```
 
 
 
@@ -2199,7 +2209,6 @@ if (plot_mort_dbh){
 
 ## we use different ways to summarize model outputs to do variance decomposition
 
-fire_month = c("6","7","8","9","10")
 #1. the max monthly mean value 
 asses_vars   = names(survi_mmean)[c(8,12:16,18:19)]
 
@@ -2216,8 +2225,7 @@ max_all     = all_mmean                                                     %>%
                ungroup()
 
 mmean_hlm      = hlm1d                                                      %>% 
-              dplyr::select(all_of(
-                c("case","ens_label","time","eflx_lh_tot",fire_vars)))      %>% 
+              dplyr::select(all_of(c("case","ens_label","time","eflx_lh_tot",fire_vars)))      %>% 
               mutate(month=month(time))                                     %>% 
               select(-time)                                                 %>% 
               group_by(case,ens_label,month)                                %>% 
@@ -2242,21 +2250,38 @@ maxsur_sens     = max_survi                                     %>%
 maxall_sens     = max_all                                       %>% 
                   left_join(max_hlmall,by=c("case","ens_label"))
 
-#2. only fire season: 6,7,8,9,10
+#2. fire variables and mortality only in fire season: 6,7,8,9,10, lai, gpp, agb in growing season 3,4,5
+mort    = asses_vars[2:6]
+produc  = asses_vars[c(1,7:8)]
 
-fs_sur   =    survi_mmean                                                   %>% 
-              filter(month %in% fire_month)                                 %>% 
-              dplyr::select(all_of(c("case","ens_label",asses_vars)))       %>% 
-              group_by(case,ens_label)                                      %>% 
-              summarize_all(mean,na.rm=TRUE)                                %>% 
-              ungroup()
+mort_sur   =    survi_mmean                                                   %>% 
+                filter(month %in% fire_month)                                 %>% 
+                dplyr::select(all_of(c("case","ens_label",mort)))             %>% 
+                group_by(case,ens_label)                                      %>% 
+                summarize_all(mean,na.rm=TRUE)                                %>% 
+                ungroup()
+prod_sur   =    survi_mmean                                                   %>% 
+                filter(month %in% growing_sea)                                %>% 
+                dplyr::select(all_of(c("case","ens_label",produc)))           %>% 
+                group_by(case,ens_label)                                      %>% 
+                summarize_all(mean,na.rm=TRUE)                                %>% 
+                ungroup()
+fs_sur     = prod_sur %>% left_join(mort_sur,by=c("case","ens_label"))
 
-fs_all     = all_mmean                                                      %>% 
-             filter(month %in% fire_month)                                  %>%
-             dplyr::select(all_of(c("case","ens_label",asses_vars)))        %>% 
-             group_by(case,ens_label)                                       %>% 
-             summarize_all(mean,na.rm=TRUE)                                 %>% 
-             ungroup()
+mort_all   =    all_mmean                                                     %>% 
+                filter(month %in% fire_month)                                 %>% 
+                dplyr::select(all_of(c("case","ens_label",mort)))             %>% 
+                group_by(case,ens_label)                                      %>% 
+                summarize_all(mean,na.rm=TRUE)                                %>% 
+                ungroup()
+prod_all  =     all_mmean                                                     %>% 
+                filter(month %in% growing_sea)                                %>% 
+                dplyr::select(all_of(c("case","ens_label",produc)))           %>% 
+                group_by(case,ens_label)                                      %>% 
+                summarize_all(mean,na.rm=TRUE)                                %>% 
+                ungroup()
+
+fs_all     = prod_all %>% left_join(mort_all,by=c("case","ens_label"))
 
 fs_fireall    = mmean_hlm                                                   %>% 
                 filter(month %in% fire_month)                               %>% 
@@ -2279,7 +2304,7 @@ fssur_sens  = fs_sur                                        %>%
 decomp_vars   = c (fire_vars,asses_vars)
 n_var         = length(asses_vars)
 
-pars         = names(param_survi)[c(1:5)] #slamax and slatop are same, so we chose only one
+pars         = names(param_survi)[c(1:6)] #slamax and slatop are same, so we chose only one
 n_param      = length(pars)
 
 
@@ -2300,50 +2325,52 @@ fsall_sens   = fsall_sens                                        %>%
 
 
 
-```{r,"trait-model-ouputs-correlations",message=FALSE,fig.height=12, fig.width=14}
+```{r,label="trait-model-ouputs-correlations",message=FALSE,fig.height=12, fig.width=14}
 
 
 cor_survi   = fssur_sens
 cor_allens  = fsall_sens
-type        = "fire season"
-cor_survi   = cor_survi[c(1,3:20)] 
-cor_allens  = cor_allens[c(1,3:20)]
+type        = "all season"
+#cor_survi   = cor_survi[c(1,3:15,17:22)] 
+cor_allens  = cor_allens[,c(1,3:15,17:22)]
+cor_nams    = c("GPP","AGB","LAI","$ Mort[Cstar]","$ Mort[Hydro]","$ Mort[Term]",
+                "$ Mort[Can]","$ Mort[Und]","LH",
+                "$ Fire[Area]","$ Fire[FDI]","$ Fire[ROS]", "$ Fire[Fuel]",
+                "$ Param[FBD-dead]","$ Param[FBD-live]",
+                "$ Param[Nignition]", "$ Param[Drying]", "$ Param[fuel-enrgy]",
+                "$ Param[Frag]")
                
 
 
 for(c in sequence(ncase)){
   case_now  = case_names[c]
   desc_now  = case_desc[c]
-  survi_now = cor_survi                 %>% 
-              filter(case == case_now)  %>% 
-              dplyr::select(-case)
+ # survi_now = cor_survi                 %>% 
+ #             filter(case == case_now)  %>% 
+ #             dplyr::select(-case)
   all_now   = cor_allens                %>% 
               filter(case == case_now)  %>% 
               dplyr::select(-case)
   
 
-  corr_surviens     = cor(survi_now)
-  p_sur             = cor.mtest(survi_now,conf.level=0.95, method="pearson")$p
+  #corr_surviens     = cor(survi_now)
+  #p_sur             = cor.mtest(survi_now,conf.level=0.95, method="pearson")$p
   corr_allens       = cor(all_now)
   p_all             = cor.mtest(all_now,conf.level=0.95, method="pearson")$p
   
-  cor_nams          = c("GPP","$ Mort[Cstar]","$ Mort[Hydro]","$ Mort[Term]",
-                        "$ Mort[Can]","$ Mort[Und]","AGB","LAI",":lambda*E",
-                        "$ Fire[Area]","$ Fire[FDI]", "$ Fire[Fuel]",
-                        "$ Fire[Fblkd]", "$ Param[FBD-dead]","$ Param[FBD-live]",
-                        "$ Param[Nignitn]", "$ Param[Drying]", "$ Param[fuel-enrgy]")
-  colnames(corr_surviens) = cor_nams
-  rownames(corr_surviens) = cor_nams
+ 
+  #colnames(corr_surviens) = cor_nams
+  #rownames(corr_surviens) = cor_nams
   colnames(corr_allens) = cor_nams
   rownames(corr_allens) = cor_nams
-  colnames(p_sur) = cor_nams
-  rownames(p_sur) = cor_nams
+  #colnames(p_sur) = cor_nams
+  #rownames(p_sur) = cor_nams
   colnames(p_all) = cor_nams
   rownames(p_all) = cor_nams
   
   f_output = paste0(desc_now,"_",type,"_correlation-all.png")
   png(file=file.path(plot_main,f_output),
-  width=13,height=8,units="in",res=600)
+  width=5.5,height=5.5,units="in",res=600)
 
   corrplot(corr_allens
           ,method      = "ellipse"
@@ -2351,39 +2378,40 @@ for(c in sequence(ncase)){
           ,p.mat       = p_all
           ,sig.level   = 0.05
           ,insig       = "blank"
-          ,addCoef.col = "grey50"
-          ,title = paste(desc_now,type,"all ensembles",sep=" ")
+          #,addCoef.col = "grey50"
+          #,title = paste(desc_now,type,"all ensembles",sep=" ")
+          ,title=desc_now
           ,mar=c(0,0,1,0)
           #,addCoefasPercent=TRUE
           #,cl.pos="n"
           ,order = "original"
-         #,diag=FALSE
+          ,diag=FALSE
           ,number.cex=0.55
           ,tl.cex = 1
           ,tl.col="black"
           ,cl.cex=1)
   dev.off()
 
-  f_output=paste0(desc_now,"_",type,"_correlation-survi.png")
-  png(file=file.path(plot_main,f_output),
-     width=13,height=8,units="in",res=600)
+ # f_output=paste0(desc_now,"_",type,"_correlation-survi.png")
+ # png(file=file.path(plot_main,f_output),
+ #    width=13,height=8,units="in",res=600)
 
-  corrplot(corr_surviens
-          ,method      = "ellipse"
-          ,type        = "lower"
-          ,p.mat       = p_sur
-          ,sig.level   = 0.05
-          ,insig       = "blank"
-          ,addCoef.col = "grey50"
-          ,title       = paste(desc_now,type,"survived ensembles",sep=" ")
-          ,mar         = c(0,0,1,0)
-          ,order       = "original"
+ # corrplot(corr_surviens
+ #         ,method      = "ellipse"
+ #         ,type        = "lower"
+ #         ,p.mat       = p_sur
+ #         ,sig.level   = 0.05
+ #         ,insig       = "blank"
+ #         ,addCoef.col = "grey50"
+ #         ,title       = paste(desc_now,type,"survived ensembles",sep=" ")
+ #         ,mar         = c(0,0,1,0)
+ #         ,order       = "original"
           #,diag  = FALSE
-          ,number.cex  = 0.55
-          ,tl.cex      = 1
-          ,tl.col      ="black"
-          ,cl.cex      = 1)
-dev.off()
+ #         ,number.cex  = 0.55
+ #         ,tl.cex      = 1
+ #         ,tl.col      ="black"
+ #         ,cl.cex      = 1)
+#dev.off()
   
 }
 
@@ -2398,8 +2426,11 @@ dev.off()
 
 ```{r,label="variance-decomp-main",message=FALSE}
 
-decom_y = c("fates_burnfrac")
-decom_x = names(fssur_sens)[c(3:10,13:20)]
+
+# by case
+if_plot=FALSE
+decom_y = c("fates_burnfrac","fates_fuel_amount")
+decom_x = names(fssur_sens)[c(3:11,13:15,17:22)]
 n_x     = length(decom_x)
 n_y     = length(decom_y)
 sens_main = matrix( data=NA_real_
@@ -2410,7 +2441,7 @@ sens_main = matrix( data=NA_real_
 last_col = ncol(sens_main)
 sens_plot = list()
 sens_df   = fssur_sens #to select doing variance decompose for all or survived ensembles
-type      = "fire-season"
+type      = "fire-season-bycase"
 for(c in sequence(ncase)){
   case_now  = case_names[c]
   desc_now  = case_desc[c]
@@ -2420,15 +2451,16 @@ for(c in sequence(ncase)){
   for(p in sequence(n_x)){
     p_now   = decom_x[p] 
     df_now  = sens_now %>% select(p_now,var_now)
-    df_sort = df_now[do.call(order, df_now[, p_now]), ]
-    x       = df_sort[[p_now]]
-    y       = df_sort[[var_now]]
+    #df_sort = df_now[do.call(order, df_now[, p_now]), ]
+    x       = df_now[[p_now]]
+    y       = df_now[[var_now]]
     fit     = lm(y ~ x)
     #fit     = lm(y ~ bs(x,df=3))
     #fit = smooth.spline(y~x,df=4)
     moddf      = data.frame(x=x,y=y)
     moddf$pred = predict(fit,data.frame(x=x))
     #moddf$pred = fit$y
+    if(if_plot){
     gg_now = ggplot(data=moddf,aes(x,y))
     gg_now = gg_now + geom_point()
     gg_now = gg_now + geom_line(data=moddf,aes(x,pred),lwd=1)
@@ -2447,7 +2479,7 @@ for(c in sequence(ncase)){
                          )#end theme
     
     for (d in sequence(ndevice)){
-    f_output = paste(desc_now,"-",type,"-",var_now,"-",p_now,"-main.",gg_device[d])
+    f_output = paste0(desc_now,"-",type,"-",var_now,"-",p_now,".",gg_device[d])
     dummy    = ggsave( filename = f_output
                      , plot     = gg_now
                      , device   = gg_device[d]
@@ -2458,7 +2490,7 @@ for(c in sequence(ncase)){
                      , dpi      = gg_depth
                      )
   }
-  sens_plot[[desc_now]][[var_now]][[p_now]]=gg_now
+  sens_plot[[desc_now]][[var_now]][[p_now]]=gg_now}
   if(c==1){
   sens_main[v,p]           = var(moddf$pred)/var(moddf$y)
   sens_main[v,last_col]    = desc_now  
@@ -2471,6 +2503,76 @@ for(c in sequence(ncase)){
       } #end p in sequence(n_param)   
    } #end v in sequence(n_var
 } # end c in seuqnece(ncase)
+
+
+## overall
+
+decomall_y1 = c("fates_burnfrac")
+decomall_x1 = names(fssur_sens)[c(1,17:22)] #only global varying parameter
+decomall_y2 = c("fates_fuel_amount")
+decomall_x2 = names(fssur_sens)[c(1,3:10,22)] #global varying parameter and variable
+decomall_y    = decomall_y1
+decomall_x = decomall_x1
+n_x     = length(decomall_x)
+n_y     = length(decomall_y)
+sensall_main = matrix( data=NA_real_
+                  , nrow=n_y
+                  , ncol=n_x
+                  , dimnames = list(decomall_y,decomall_x))
+sens_plot = list()
+sens_now   = fssur_sens %>%  mutate(case = as.factor(case))
+type      = "fire-survi-allcase"
+
+  for(v in sequence(n_y)){
+  var_now = decomall_y[v]
+  for(p in sequence(n_x)){
+    p_now   = decomall_x[p] 
+    df_now  = sens_now %>% select(all_of(c(p_now,var_now)))
+    x       = df_now[[p_now]]
+    y       = df_now[[var_now]]
+    fit     = lm(y ~ x)
+    moddf      = data.frame(x=x,y=y)
+    moddf$pred = predict(fit,data.frame(x=x))
+    if(if_plot){
+    gg_now = ggplot(data=moddf,aes(x,y))
+    gg_now = gg_now + geom_point()
+    gg_now = gg_now + geom_line(data=moddf,aes(x,pred),lwd=1)
+    gg_now = gg_now + xlab(rlang::sym(p_now))
+    gg_now = gg_now + ylab(rlang::sym(var_now))
+    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
+    gg_now = gg_now + theme( legend.position   = "bottom"
+                         , axis.text.x       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , plot.title        = element_text( size = gg_ptsz)
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         )#end theme
+    
+    for (d in sequence(ndevice)){
+    f_output = paste0(desc_now,"-",type,"-",var_now,"-",p_now,".",gg_device[d])
+    dummy    = ggsave( filename = f_output
+                     , plot     = gg_now
+                     , device   = gg_device[d]
+                     , path     = sens_path
+                     , width    = gg_width
+                     , height   = gg_height
+                     , units    = gg_units
+                     , dpi      = gg_depth
+                     )
+  }
+  sens_plot[[var_now]][[p_now]]=gg_now } #end of if(if_plot)
+  sensall_main[v,p]           = var(moddf$pred)/var(moddf$y)
+
+   } #end p in sequence(n_param)   
+   } #end v in sequence(n_var
+
+
+sensall_bf = sensall_main
+sensall_fl = sensall_main
+
 
 
 ```
@@ -2487,6 +2589,7 @@ for(c in sequence(ncase)){
 
 
 ```{r,label="param-effects-rank",fig.height=9,fig.width=11.25}
+# by case
 
 var                  = rownames(sens_main)
 sens_madf            = as_tibble(sens_main)
@@ -2498,12 +2601,13 @@ sens_decom           = sens_decom                                              %
                        pivot_longer(cols = decom_x[1]:decom_x[length(decom_x)]
                                    ,names_to  = "parameter"
                                    ,values_to = "var_decomp")   
-par_label            = cor_nams[c(1:8,11:18)]
+par_label            = cor_nams[c(1:9,11:19)]
 par_label            = gsub(pattern="\\$ ", replacement="",x=par_label)
+par_label            = gsub(pattern=":", replacement="", x=par_label)
 
 sens_decom           = sens_decom                                                %>% 
                        mutate( var_decomp = round(as.numeric(var_decomp)*100,1)
-                             , label      = rep(par_label,time=n_y*ncase)) 
+                             , label      = rep(par_label,time=n_y*ncase/2)) 
   
 var_label            = c("Burned area"
                         ,"Fire danger index"
@@ -2520,45 +2624,153 @@ decomp_plot=list()
 for(c in sequence(ncase)){
   desc_now   = case_desc[c]
   decomp_now = sens_decom %>% filter(case==desc_now)
+  decomp_now = decomp_now %>% arrange(var_decomp)
+  decomp_now = decomp_now %>% mutate(label=factor(label,levels=unique(label))) %>% filter(var_decomp>1)
   
   gg_now = ggplot(decomp_now,aes(var_decomp,label)) 
-  gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp,colour=type)
-                                  ,size=4, alpha=0.7)#,position = position_dodge(width = 0.2))
-  gg_now = gg_now + scale_colour_manual(values = ens_colour[c(1,3)])
-  gg_now = gg_now + facet_wrap(.~ model_var,labeller=labeller(model_var=var_label))
-  gg_now = gg_now + labs(title = paste(desc_now,type,sep="-"))
-  gg_now = gg_now + xlab("Variance explained (%)")
-  gg_now = gg_now + ylab(element_blank())
+  gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp)
+                                  ,size=5)#,position = position_dodge(width = 0.2))
+  #gg_now = gg_now + scale_colour_manual(values = ens_colour[c(1,3)])
+  #gg_now = gg_now + facet_wrap(.~ model_var,labeller=labeller(model_var=var_label))
+  #gg_now = gg_now + labs(title = paste(desc_now,type,sep="-"))
+  gg_now = gg_now + labs(x="Variance explained (%)",y="",title=desc_now)
   gg_now = gg_now + scale_y_discrete(labels = scales::label_parse())
-  gg_now = gg_now + theme_grey( base_size = gg_ptsz
+  gg_now = gg_now + theme_grey( base_size = gg_ptsz-5
                               , base_family = "Helvetica"
                               , base_line_size = 0.5
                               , base_rect_size = 0.5)
-  gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz
+  gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz-5
                                                       , margin = unit(rep(0.35,times=4),"cm")
                                                       )#end element_text
                           , axis.text.y = element_text( size   = gg_ptsz-5
                                                       , margin = unit(rep(0.35,times=4),"cm")
                                                       )#end element_text
                           , axis.ticks.length = unit(-0.25,"cm")
-                          , legend.position   = "bottom"
-                          , legend.direction  = "horizontal"
+                          , legend.position   = "none"
                           )#end theme
-  for (d in sequence(ndevice)){
-    f_output = paste0(desc_now,"-",type,"-variance-decomp.",gg_device[d])
+ decomp_plot[[desc_now]] = gg_now
+}
+gg_patch = wrap_plots(decomp_plot)
+gg_patch = gg_patch + guide_area() + plot_layout( guides="collect",ncol=4)
+gg_patch = gg_patch + plot_annotation(title = "")
+for (d in sequence(ndevice)){
+    f_output = paste0("variance-decomp-allcase.",gg_device[d])
     dummy    = ggsave( filename = f_output
-                     , plot     = gg_now
+                     , plot     = gg_patch
                      , device   = gg_device[d]
                      , path     = plot_main
                      , width    = gg_widthn
                      , height   = gg_height
                      , units    = gg_units
-                     , dpi      = gg_depth
+                     #, dpi      = gg_depth
                      )
      } #end d in sequence(ndevice)
- decomp_plot[[desc_now]] = gg_now
-}
 if(gg_screen) decomp_plot
+
+
+# overall
+
+var                  = rownames(sensall_bf)
+sensall_madf         = as_tibble(sensall_bf)
+sensall_madf$model_var  = var
+sensall_madf$type       = "main"
+
+
+sensall_decom           = sensall_madf                                        %>%  
+                          pivot_longer(cols =case:o5_fates_frag_maxdecomp
+                                      ,names_to  = "parameter"
+                                      ,values_to = "var_decomp")   
+
+par_labelx1            = c("BaseParameters","FBD[dead]","FBD[live]","Ignition","DryingRatio","FuelEnergy","MaxDecomp")
+par_labelx2            = c("BaseParameters","GPP","AGB","LAI","Mort[Cstar]","Mort[Hydro]","Mort[Term]",
+                           "Mort[Can]","Mort[Ustor]",#"Burnt[A]","Fire[FDI]","Fire[ROS]","Fire[FBD]","Param[FBD-dead]",
+                          #"Param[FBD-live]","Param[Nigni]","Param[Drying]","Param[Energy]",
+                          "Param[Max-decomp]")
+
+par_label = par_labelx1
+
+sensall_decom        = sensall_decom                                                %>% 
+                       mutate( var_decomp = round(as.numeric(var_decomp)*100,1)
+                             , label      = par_label) 
+  
+loop_list   = which(hlm1dvar$vnam %in% decomall_y1)
+decomp_plot=list()
+for(d in loop_list){
+   h_vnam   = hlm1dvar$vnam [d] 
+   h_desc   = hlm1dvar$desc [d]
+   h_short  = hlm1dvar$short[d]
+   h_unit   = hlm1dvar$unit [d]
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+   decomp_now = sensall_decom %>% filter(model_var==h_vnam)
+   decomp_now = decomp_now %>% arrange(var_decomp)
+   decomp_now = decomp_now %>% mutate(label=factor(label,levels=unique(label))) 
+   
+   gg_now = ggplot(decomp_now,aes(var_decomp,label)) 
+  #gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp,colour=type)
+  #                                ,size=4, alpha=0.7)#,position = position_dodge(width = 0.2))
+  gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp),size=5)
+  #gg_now = gg_now + scale_colour_manual(values = ens_colour[c(1,3)])
+  #gg_now = gg_now + facet_wrap(.~ model_var,labeller=labeller(model_var=var_label))
+  #gg_now = gg_now + ggtitle(parse(text=h_short))
+  gg_now = gg_now + ggtitle(h_desc)
+  gg_now = gg_now + xlab("Variance explained (%)")
+  gg_now = gg_now + ylab(element_blank())
+  gg_now = gg_now + scale_y_discrete(labels = scales::label_parse())
+  gg_now = gg_now + theme_bw( base_size = gg_ptsz*1.5
+                              , base_family = "Helvetica"
+                              , base_line_size = 0.5
+                              , base_rect_size = 0.5)
+  gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz-2
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.text.y = element_text( size   = gg_ptsz-2
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.ticks.length = unit(-0.25,"cm")
+                          , legend.position   = "none"
+                          , legend.direction  = "horizontal"
+                          , plot.title=element_text(hjust=0.5)
+                          , plot.margin=unit(c(0,0,0,0),"mm")
+                          )#end theme
+  for (d in sequence(ndevice)){
+    f_output = paste0(type,"-variance-decomp1.",gg_device[d])
+    dummy    = ggsave( filename = f_output
+                     , plot     = gg_now
+                     , device   = gg_device[d]
+                     , path     = plot_main
+                     , width    = gg_widthn*0.5
+                     , height   = gg_height*0.5
+                     , units    = gg_units
+                     #, dpi      = gg_depth
+                     )
+     } #end d in sequence(ndevice)
+
+  
+decomp_plot[[h_vnam]] = gg_now
+}
+
+gg_bf = gg_now
+gg_fl = gg_now
+
+decomp_plot_reorder = list(gg_bf,gg_fl)
+gg_patch = wrap_plots(decomp_plot_reorder)
+gg_patch = gg_patch + guide_area() + plot_layout( guides="collect",ncol=2)
+gg_patch = gg_patch + plot_annotation(tag_level = "a",title = "")
+  for (d in sequence(ndevice)){
+    f_output = paste0(type,"-variance-decomp.",gg_device[d])
+    dummy    = ggsave( filename = f_output
+                     , plot     = gg_patch
+                     , device   = gg_device[d]
+                     , path     = plot_main
+                     , width    = gg_widthn
+                     , height   = gg_height*0.8
+                     , units    = gg_units
+                     #, dpi      = gg_depth
+                     )
+     } #end d in sequence(ndevice)
+
+
 
 ```
 
@@ -2671,6 +2883,7 @@ if(gg_screen) gg_now
 ```{r,label="ensemble-filtering",message=FALSE,results='hide'}
 rm(mmean_now,mmean_plot)
 
+
 ## we first filter ensemble members using site obervations
 ens_filt    = mmean_com       %>% 
               filter(case!=0) %>% 
@@ -2777,7 +2990,8 @@ filt_fire    = filt_fire                                         %>%
                filter(month %in% fire_month)                     %>% 
                group_by(case,ens_label,case_ens,year)            %>%
                summarize(bfrac_model = 
-                           mean(fates_burnfrac,na.rm=TRUE))      %>% 
+                           mean(fates_burnfrac,na.rm=TRUE),
+                         bfrac_modmedian = median(fates_burnfrac,na.rm=TRUE))      %>% 
                ungroup()
 
 filt_fire    = filt_fire                        %>% 
@@ -2796,20 +3010,22 @@ filt_fire    = filt_fire                             %>%
                filter(kp_cnt >=6)                    %>% 
                ungroup()
   
-keep_region = unique(filt_fire$case_ens) #there are 84 ensembles 
+keep_site = unique(filt_fire$case_ens) #there are 4 ensembles 
 
 ## use regional burned fraction range 
-cags_bf    = fread(frap_grass)       
+cags_bf    = fread(frap_grass_wrf)       
 cags_bf    = cags_bf                       %>% 
              filter(year %in% simu_time)   %>% 
-             mutate(bfrac=bfrac/yr.day)
+             mutate(bfrac=bfrac)
 
              
 cags_dmean = cags_bf                                   %>%
              group_by(lon,lat)                         %>% 
              summarize(bfrac=mean(bfrac,na.rm=TRUE))   %>% 
              ungroup() 
-
+cagsmean_upr = quantile(cags_dmean$bfrac,probs=qupr_ribbon,na.rm=TRUE)
+cagsmean_lwr = quantile(cags_dmean$bfrac,probs=qlwr_ribbon,na.rm=TRUE)
+cagsmean_median = median(cags_dmean$bfrac,na.rm=TRUE)
 
 ## range of annual burned fraction by each year using regional data         
 cags_quantyr = cags_bf                                 %>% 
@@ -2819,31 +3035,37 @@ cags_quantyr = cags_bf                                 %>%
                         ,yr_mean = mean(bfrac,na.rm=TRUE)) %>% 
                ungroup()
                
-# min and max cell-level mean annual burned fraction
-lw_bf       = min(cags_dmean$bfrac)
-hi_bf       = max(cags_dmean$bfrac)
 
 ## approach 1
 filt_fire    = hlm1d                                             %>% 
                dplyr::select(case,ens_label,time,fates_burnfrac) %>% 
-               mutate(case_ens = paste0(case,"_",ens_label))     %>% 
+               mutate(case_ens = paste0(case,"_",ens_label),
+                      fates_butnfrac = fates_burnfrac*yr.day)    %>% 
                filter(case_ens %in% ens_keep)
 filt_fire    = filt_fire                                         %>% 
                mutate(month=month(time))                         %>% 
                filter(month %in% fire_month)                     %>% 
                group_by(case,ens_label,case_ens)                 %>%
                summarize(bfrac_model = 
-                           mean(fates_burnfrac,na.rm=TRUE))      %>% 
+                           mean(fates_burnfrac,na.rm=TRUE),
+                         bfrac_modmdian = median(fates_burnfrac,na.rm=TRUE))      %>% 
                ungroup()
-filt_fire$lw_bf = lw_bf
-filt_fire$hi_bf = hi_bf
+
+filt_fire$mean_qlwr = cagsmean_lwr
+filt_fire$mean_qupr = cagsmean_upr
+filt_fire$mean_median = cagsmean_median
 
 
 ## filter with low and max mean annual bf
 
 filt_fire     = filt_fire                                         %>% 
-                filter(bfrac_model >=lw_bf & bfrac_model<=hi_bf)  
-keep_region1 = filt_fire$case_ens[order(filt_fire$bfrac_model,decreasing=TRUE)[1:5]]
+                filter(bfrac_model >=mean_qlwr & bfrac_model<=mean_qupr)  
+
+filt_fire     = filt_fire                                         %>% 
+                mutate(rela_bf = bfrac_modmdian/cagsmean_median)     %>% 
+                filter(rela_bf >= 0.99 & rela_bf <= 1.01)
+#keep_region1 = filt_fire$case_ens[order(filt_fire$bfrac_model,decreasing=TRUE)[2000]]
+keep_region1 = unique(filt_fire$case_ens)
 
 ## too many 
 
@@ -2851,7 +3073,8 @@ keep_region1 = filt_fire$case_ens[order(filt_fire$bfrac_model,decreasing=TRUE)[1
 ## approach2: filter by annual trend
 filt_fire    = hlm1d                                             %>% 
                dplyr::select(case,ens_label,time,fates_burnfrac) %>% 
-               mutate(case_ens = paste0(case,"_",ens_label))     %>% 
+               mutate(case_ens = paste0(case,"_",ens_label),
+                      fates_burnfrac = fates_burnfrac*yr.day)    %>% 
                filter(case_ens %in% ens_keep)
 filt_fire    = filt_fire                                         %>% 
                mutate(month=month(time),year=year(time))         %>% 
@@ -2859,7 +3082,7 @@ filt_fire    = filt_fire                                         %>%
                group_by(case,ens_label,case_ens,year)            %>%
                summarize(fates_burnfrac = 
                            mean(fates_burnfrac,na.rm=TRUE))      %>% 
-               ungroup()
+               ungroup()                       
 
 filt_fire    = filt_fire                                         %>% 
                left_join(cags_quantyr,by="year")                 %>% 
@@ -2871,9 +3094,9 @@ filt_fire    = filt_fire                                         %>%
                mutate(kep_cnt = sum(mark=="keep"))               %>% 
                ungroup()
 filt_fire    = filt_fire                                         %>% 
-               filter(kep_cnt >=10)
+               filter(kep_cnt >=11)
                                     
-keep_region2 = unique(filt_fire$case_ens) #45 ensemble members
+keep_region2 = unique(filt_fire$case_ens) #6 ensemble members
 
 ## approach 3: relative annual burned fraction is close to 1
 
@@ -2900,11 +3123,11 @@ filt_fire    = filt_fire                                         %>%
                mutate(kep_cnt = sum(mark=="keep"))               %>% 
                ungroup()
 filt_fire    = filt_fire                                         %>% 
-               filter(kep_cnt >=10)
+               filter(kep_cnt >=13)
                                     
 keep_region3 = unique(filt_fire$case_ens)
 
-keep_final  = c(keep_region1,keep_region2,keep_region3)
+keep_final  = c(keep_site,keep_region1,keep_region2,keep_region3)
 keep_final  = unique(keep_final)
 
 ```
@@ -2919,7 +3142,7 @@ keep_final  = unique(keep_final)
 fireamean_keep =  hlm1d                                             %>% 
                   dplyr::select(case,ens_label,time,fates_burnfrac) %>% 
                   mutate(case_ens = paste0(case,"_",ens_label))     %>% 
-                  filter(case_ens %in% keep_final)
+                  filter(case_ens %in% keep_region2)
 fireamean_keep = fireamean_keep                                    %>% 
                  mutate(month=month(time),year=year(time))         %>% 
                  filter(month %in% fire_month)                     %>% 
@@ -2945,11 +3168,12 @@ for(h in fire_loop){
    
    gg_now = ggplot(data=fire_now)
    gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))
-   gg_now = gg_now + geom_line(aes_string(x="year",y=h_vnam,group="ens_label",color="'Model'"),lwd=0.2,alpha=0.8,show.legend=TRUE)
+   gg_now = gg_now + geom_line(aes_string(x="year",y=h_vnam,group="case_ens",color="case_ens"),lwd=0.7,alpha=0.8,show.legend=TRUE)
    gg_now = gg_now + geom_line(aes(x=year,y=yr_mean,color="FRAP"))
-   gg_now = gg_now + scale_colour_manual(name=""
-                                        ,values=c("Model"= ens_colour[1]
-                                                 ,"FRAP" = site_colour))
+   gg_now = gg_now + scale_color_manual(name="",values=c(top12[1:6],site_colour))
+   #gg_now = gg_now + scale_colour_manual(name=""
+   #                                     ,values=c("Model"= ens_colour[1]
+   #                                              ,"FRAP" = site_colour))
    gg_now = gg_now + geom_ribbon( aes(x = year,ymin=yr_qlwr,ymax=yr_qupr)
                                 , alpha       = alpha_ribbon
                                 , inherit.aes = FALSE
@@ -2961,7 +3185,7 @@ for(h in fire_loop){
    #gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
    gg_now = gg_now + xlab(element_blank())
    gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
-   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
    gg_now = gg_now + theme( legend.position   = "right"
                          , legend.text=element_text(size=gg_ptsz)
                          , axis.text.x        = element_text( size   = gg_ptsz
@@ -2975,13 +3199,13 @@ for(h in fire_loop){
  
    # Save plots.
    for (d in sequence(ndevice)){
-    h_output = paste0(h_vnam,"_combineKeep.",gg_device[d])
+    h_output = paste0(h_vnam,"_keepfinal.",gg_device[d])
     dummy    = ggsave( filename = h_output
                     , plot      = gg_now
                     , device    = gg_device[d]
                     , path      = secy_path
-                    , width     = gg_width
-                    , height    = gg_height
+                    , width     = gg_widthn
+                    , height    = gg_height*0.8
                     , units     = gg_units
                     , dpi       = gg_depth
                     )

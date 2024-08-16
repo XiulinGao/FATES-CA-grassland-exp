@@ -4,9 +4,8 @@
 ### Author: Xiulin Gao
 ### author-email: xiulingao@lbl.gov
 ### Date: 2022-08-15
-
-library(raster)
 library(sp)
+library(raster)
 library(ncdf4)
 library(tidyverse)
 
@@ -67,7 +66,7 @@ wrf_rs    = raster(wrf_extnt,ncols=147,nrows=151,crs=wgs)
 nlcd_mean = resample(nlcd80_wgs, wrf_rs, method="bilinear")
 nlcd_ngb  = resample(nlcd80_wgs, wrf_rs, method="ngb") 
 # ngb works better given the resulted central valley region is almost all NA
-
+writeRaster(nlcd_ngb,filename=file.path(paste0("~/Google Drive/My Drive/9km-WRF-1980-2020/","wrf-extent-masked-grassland.img")))
 
 
 nlcdherb_ngb  = as.data.frame(nlcd_ngb,xy=TRUE)
@@ -125,7 +124,7 @@ xx  = ncdim_def( name="lon"   ,units="",vals= sequence(147)  ,create_dimvar=FALS
 yy  = ncdim_def( name="lat"   ,units="",vals= sequence(151)  ,create_dimvar=FALSE)
 nc_xy  = list   (xx,yy)
 xy     = c(147,151)
-file_name = file.path("Google Drive/My Drive/wrf_CA_grass_ngb80.nc")
+file_name = file.path("~/Google Drive/My Drive/wrf_sn.nc")
 nc_vlist        = list()
 nc_vlist$LONGXY = ncvar_def(  name      = "lsmlon"
                              , units    = "degrees_east"
@@ -157,7 +156,7 @@ nc_vlist$mask2   = ncvar_def( name      = "mod_lnd_props"
 att_template = list( title            = "To be replaced when looping through months"
                      , date_created   = paste0(as.character(now(tzone="UTC")), "UTC")
                      , source_code    = "mask-wrf-domain.R"
-                     , code_notes     = "land mask for WRF domain created using NLCD herb cover >=80"
+                     , code_notes     = "land mask for Sierra onto WRF domain "
                      , code_developer = paste0( author_name
                                                 ," <"
                                                 , author_email
@@ -173,7 +172,7 @@ dummy = ncvar_put(nc=nc_new, varid ="landmask",vals=land_mask80)
 dummy = ncvar_put(nc=nc_new, varid ="mod_lnd_props",vals=land_mkdif80)
 
 
-nc_title   = "Land mask for WRF domain with herbaceous cover >=80%"
+nc_title   = "Land mask for Sierra domain on WRF domain "
 att_global = modifyList( x = att_template, val = list( title = nc_title ))
 
 

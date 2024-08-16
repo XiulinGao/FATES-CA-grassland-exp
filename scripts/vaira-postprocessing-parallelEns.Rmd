@@ -125,6 +125,7 @@ dummy = dir.create(sens_path   , recursive = TRUE, showWarnings = FALSE)
 
 
 
+
 ```{r,label="user-pft"}
 user_pftinfo = TRUE
 
@@ -149,7 +150,7 @@ pftinfo[[n]] = list( id     = 1
 
 ```{r,label="plot-setting"}
 
-gg_device  = c("pdf")     # Output devices to use (Check ggsave for acceptable formats)
+gg_device  = c("tiff")     # Output devices to use (Check ggsave for acceptable formats)
 gg_depth   = 600          # Plot resolution (dpi)
 gg_ptsz    = 18           # Font size
 gg_ptszl   = 26
@@ -197,8 +198,11 @@ source(file.path(util_path,"load.everything.r"),chdir=TRUE)
 
 ```{r,label="extra-packages",message=FALSE,results='hide'}
 library(GGally)
-library(splines)
+library(ggpubr)
 library(corrplot)
+library(emmeans)
+library(agricolae)
+
 
 ```
 
@@ -785,7 +789,7 @@ for(c in sequence(ncase)){
   h_vnam              = hlm1dvar$vnam[h]
   h_add0              = eval(parse(text=hlm1dvar$add0[h]))
   h_mult              = eval(parse(text=hlm1dvar$mult[h]))
-  nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
+  nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow,collapse_degen=TRUE)
   nc_dat              = nc_dat[181:432,] 
   ncm_dat             = matrix(nc_dat, ncol=1)
   
@@ -921,7 +925,7 @@ for (c in sequence(ncase)){
   if (is.null(now_agemelt)){
     now_agemelt = now_melt
   }else{
-        now_agemelt = as_tibble(merge(x=now_agemelt,y=now_melt,by=c("case","ens_label","time","age"),all=TRUE))
+        now_agemelt = now_agemelt %>% left_join(now_melt,by=c("case","ens_label","time","age"))
   }#end if (is.null(age_melt))
   
   }#end for (a in sequence(nbyage))
@@ -1073,7 +1077,7 @@ dphen$pft = as.integer(dphen$pft)
 bysoi$soi = as.integer(bysoi$soi)
 
 ## write out tables so can use later
-#fwrite(byage,file.path(main_path,paste0("allcase_byage.csv")))
+#fwrite(byage,file.path(main_path,paste0("allcase_byage-WTCrownarea.csv")))
 #fwrite(bypft,file.path(main_path,paste0("allcase_bypft.csv")))
 #fwrite(dphen,file.path(main_path,paste0("allcase_dphen.csv")))
 #fwrite(bysoi,file.path(main_path,paste0("allcase_bysoi.csv")))
@@ -1081,6 +1085,7 @@ bysoi$soi = as.integer(bysoi$soi)
 
 bypft = fread(file.path(main_path,"allcase_bypft.csv"))
 hlm1d = fread(file.path(main_path,"allcase_hlm1d.csv"))
+byage = fread(file.path(main_path,"allcase_byage.csv"))
 
 ```
 
@@ -1102,7 +1107,7 @@ param_config$org_var = is.finite(param_config$org)
 param_config$pft_all = param_config$pft_var & (param_config$pft=="0")
 param_config$org_all = param_config$org_var & (param_config$org=="0")
 #as the first set of ensembles do not change fire-related parameters, we exclude these
-p_vlist       = param_config$parameter[!grepl(pattern="fire",param_config$parameter)] 
+p_vlist       = param_config$fates_parameter[!grepl(pattern="fire",param_config$fates_parameter)] 
 np            = length(p_vlist)
 
 
@@ -1122,7 +1127,7 @@ param_lst=list()
 for (p in sequence(np)){
   
   nc_nvnow            = p_vlist[p]
-  h                   = match(nc_nvnow,param_config$parameter)
+  h                   = match(nc_nvnow,param_config$fates_parameter)
   is_pft              = param_config$pft_var[h]
   is_org              = param_config$org_var[h]
   all_pft             = param_config$pft_all[h]
@@ -1455,6 +1460,42 @@ all_mmean = all_ens                                                    %>%
            ,fates_vegc_aboveground      = mean(fates_vegc_aboveground)
            ,fates_lai                   = mean(fates_lai))  %>%
   ungroup()
+ 
+ survi_mean = survi_ens                                                %>% 
+              group_by(case,ens_label,case_ens,pft)                    %>% 
+  summarize( fates_ddbh_canopy            = mean(fates_ddbh_canopy)
+           , fates_ddbh_ustory            = mean(fates_ddbh_ustory)
+           , fates_gpp                    = mean(fates_gpp)
+           , fates_lai_canopy             = mean(fates_lai_canopy)
+           , fates_lai_ustory             = mean(fates_lai_ustory)
+           , fates_mortality_background   = mean(fates_mortality_background)
+           , fates_mortality_cstarv       = mean(fates_mortality_cstarv)
+           , fates_mortality_hydraulic    = mean(fates_mortality_hydraulic)
+           , fates_mortality_termination  = mean(fates_mortality_termination)
+           , fates_mortality_canopy       = mean(fates_mortality_canopy)
+           , fates_mortality_ustory       = mean(fates_mortality_ustory)
+           , fates_npp                    = mean(fates_npp)
+           , fates_vegc_aboveground       = mean(fates_vegc_aboveground)
+           , fates_lai                    = mean(fates_lai))          %>% 
+  ungroup()
+ 
+ all_mean =   all_ens                                                  %>% 
+              group_by(case,ens_label,case_ens,pft)                    %>% 
+  summarize( fates_ddbh_canopy            = mean(fates_ddbh_canopy)
+           , fates_ddbh_ustory            = mean(fates_ddbh_ustory)
+           , fates_gpp                    = mean(fates_gpp)
+           , fates_lai_canopy             = mean(fates_lai_canopy)
+           , fates_lai_ustory             = mean(fates_lai_ustory)
+           , fates_mortality_background   = mean(fates_mortality_background)
+           , fates_mortality_cstarv       = mean(fates_mortality_cstarv)
+           , fates_mortality_hydraulic    = mean(fates_mortality_hydraulic)
+           , fates_mortality_termination  = mean(fates_mortality_termination)
+           , fates_mortality_canopy       = mean(fates_mortality_canopy)
+           , fates_mortality_ustory       = mean(fates_mortality_ustory)
+           , fates_npp                    = mean(fates_npp)
+           , fates_vegc_aboveground       = mean(fates_vegc_aboveground)
+           , fates_lai                    = mean(fates_lai))          %>% 
+  ungroup()
 
 survi_ens   = survi_ens                                     %>% 
               group_by(case)                                %>% 
@@ -1726,13 +1767,13 @@ for (h in emean_loop){
    h_legend = v == 1
    cat0("   - ",h_desc,".")
 
-   mmean_now        = mmean_com
-   mmean_now        = subset(mmean_now,case!=0)
+   df_now           = mmean_com %>% filter(case %in% c(4,5,6))
+   #df_now           = subset(df_now,case!=0)
    obs              = site_mmean 
    #mmean_now$case = factor(mmean_now$case,levels=unique(mmean_now$case))
    
-   gg_now = ggplot(data=mmean_now)
-   gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))
+   gg_now = ggplot(data=df_now)
+   gg_now = gg_now + facet_wrap(.~case,ncol = 1, labeller=labeller(case=case_desc))
    gg_now = gg_now + geom_line(aes_string(x="month",y=h_vnam,group="ens_label",color="'Model'")
                               ,lwd=0.1,alpha=0.8,show.legend=TRUE)
    gg_now = gg_now + geom_line(data=obs
@@ -1751,7 +1792,7 @@ for (h in emean_loop){
    gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
    gg_now = gg_now + xlab(element_blank())
    gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
-   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
    gg_now = gg_now + theme( legend.position   = "right"
                          , legend.text=element_text(size=gg_ptsz)
                          , axis.text.x        = element_text( size   = gg_ptsz
@@ -1770,10 +1811,10 @@ for (h in emean_loop){
                     , plot     = gg_now
                     , device   = gg_device[d]
                     , path     = secy_path
-                    , width    = gg_width
+                    , width    = gg_width*0.45
                     , height   = gg_height
                     , units    = gg_units
-                    , dpi      = gg_depth
+                    #, dpi      = gg_depth
                     )
    }
   gg_emean[[h_vnam]] = gg_now      
@@ -1785,6 +1826,202 @@ for (h in emean_loop){
 if (gg_screen) gg_emean
 
 ```
+
+
+
+
+
+```{r,label="plot-allometry-effecs",message=FALSE}
+
+plot_allom = hlm1d                                          %>% 
+             filter(case %in% c(4,5,6))                     %>%
+             mutate(case_ens = paste0(case,"_",ens_label))  %>% 
+              
+             dplyr::select(case,ens_label,case_ens,time
+                          ,fates_gpp,fates_vegc_aboveground
+                          ,elai,fsh,eflx_lh_tot)            %>% 
+             mutate(alom_grp = case_when(case %in% c("4") ~ "AVBA"
+                                        ,case %in% c("5") ~ "BRDI"
+                                        ,case %in% c("6") ~ "GENL")
+                    )                                        %>% 
+             mutate(month = month(time))                     %>% 
+             #filter(month %in% growing_sea)                  %>% 
+             group_by(case,ens_label,case_ens,alom_grp)      %>% 
+             dplyr::select(-c(time,month))                   %>% 
+             summarize_all(mean,na.rm=TRUE)                  %>% 
+             ungroup()
+
+
+
+allom_survi  = plot_allom                       %>% 
+               filter(case_ens %in% survi_label)
+
+n_plot       = length(hlm_var)
+
+#alom_loop = which(hlm1dvar$vnam %in% hlm_var)
+
+## HSD test
+gpp_hsd = HSD.test(aov(fates_gpp~alom_grp,data=plot_allom),"alom_grp",group=TRUE)
+lai_hsd = HSD.test(aov(elai~alom_grp,data=plot_allom),"alom_grp",group=TRUE)
+agb_hsd = HSD.test(aov(fates_vegc_aboveground~alom_grp,data=plot_allom),"alom_grp",group=TRUE)
+lh_hsd  = HSD.test(aov(eflx_lh_tot~alom_grp,data=plot_allom),"alom_grp",group=TRUE)
+sh_hsd  = HSD.test(aov(fsh~alom_grp,data=plot_allom),"alom_grp",group=TRUE)
+
+## have to mannualy assign letters given HSD test as the order is not consistent
+gpp_label = c("a","b","b")
+lai_label = c("a","ab","b")
+agb_label = c("a","b","c")
+lh_label  = c("a","a","a")
+sh_label  = c("a","b","c")
+
+
+## set location of text to be on top 
+gpp_lo  = plot_allom %>% group_by(alom_grp) %>% summarize(lo = max(fates_gpp) + 0.3)
+lai_lo  = plot_allom %>% group_by(alom_grp) %>% summarize(lo = max(elai) + 0.3 )
+agb_lo  = plot_allom %>% group_by(alom_grp) %>% summarize(lo = max(fates_vegc_aboveground) + 0.3)
+lh_lo   = plot_allom %>% group_by(alom_grp) %>% summarize(lo = max(eflx_lh_tot) + 1)
+sh_lo   = plot_allom %>% group_by(alom_grp) %>% summarize(lo = max(fsh) + 1)
+
+## tweak text location for agb plot
+agb_lo$lo <- c(0.2, 0.29, 0.22)
+agb_lo$label = agb_label
+gpp_lo$label = gpp_label
+lai_lo$label = lai_label
+lh_lo$label = lh_label
+sh_lo$label = sh_label
+
+
+
+txt_lo   = c("gpp_lo","agb_lo","lh_lo","lai_lo","sh_lo")
+
+
+
+
+gg_alom   = list()
+
+for (n in sequence(n_plot)){
+   var_now  = hlm_var[n]
+   lo_now   = get(txt_lo[n])
+   h        = which(hlm1dvar$vnam == var_now)
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   
+   
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+
+   alom_now        = plot_allom
+   ymax           = max(plot_allom[[var_now]])*1.15
+   ymin           = min(plot_allom[[var_now]])
+
+   gg_now = ggplot(data=alom_now)
+   gg_now = gg_now + geom_boxplot(aes_string(x="alom_grp",y=h_vnam,colour="alom_grp")
+                              ,show.legend=TRUE)
+   gg_now = gg_now + coord_cartesian(ylim = c(ymin, ymax))
+   gg_now = gg_now + geom_text(data=lo_now, aes(x=alom_grp,y=lo,label=label),vjust=0, size=6) 
+  
+   #gg_now = gg_now + stat_compare_means(aes_string(x="alom_grp",y=h_vnam),method="t.test",ref.group = "AVBA",
+   #                                      label = "p.signif",hide.ns=TRUE,label.y.npc=0.97,size=5.3)
+   
+   gg_now = gg_now + scale_colour_manual(name="",values=ens_colour)
+   #gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + labs(title="")
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "bottom"
+                         , legend.text=element_text(size=gg_ptsz)
+                         , axis.text.x       = element_blank()
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.15,"cm")
+                         ) #end theme
+  gg_now = gg_now + guides(colour = guide_legend(ncol=1))
+   
+  gg_alom[[h_vnam]] = gg_now      
+
+}
+
+gg_alom_reorder  = list(gg_alom$fates_gpp,gg_alom$elai,gg_alom$fates_vegc_aboveground,gg_alom$eflx_lh_tot,gg_alom$fsh)
+gg_patch = wrap_plots(gg_alom_reorder)
+gg_patch = gg_patch + guide_area() + plot_layout(guides="collect")
+gg_patch = gg_patch + plot_annotation(tag_levels = "a", title = "")
+  
+ 
+# Save plots.
+for (d in sequence(ndevice)){
+    h_output = paste0("allomeffects_allpeak.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot      = gg_patch
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_widthn*0.75
+                    , height    = gg_height*0.75
+                    , units     = gg_units
+                    #, dpi       = gg_depth
+                    )
+   }
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_patch
+
+
+
+## canopy cover for each allometry group
+byage = byage %>% dplyr::select(case,ens_label,time,age,fates_canopyarea) %>% filter(case %in% c(4,5,6))
+ca_sum = byage %>% group_by(case,ens_label,time) %>% summarize(fates_canopyarea = sum(fates_canopyarea))
+
+ca_sum = ca_sum                     %>%   
+         ungroup()                  %>% 
+         group_by(case,ens_label)   %>%
+         summarize(fates_canopyarea = mean(fates_canopyarea)) %>% 
+         mutate(alom_grp = case_when(case %in% c("4") ~ "AVBA"
+                                    ,case %in% c("5") ~ "BRDI"
+                                    ,case %in% c("6") ~ "GENL")) %>% 
+         ungroup()
+
+
+         
+gg_now = ggplot(data=ca_sum)
+gg_now = gg_now + geom_boxplot(aes(x=alom_grp,y=fates_canopyarea,colour=alom_grp)
+                              ,show.legend=TRUE)
+gg_now = gg_now + scale_colour_manual(name="",values=ens_colour)
+gg_now = gg_now + labs(title="")
+gg_now = gg_now + xlab(element_blank())
+gg_now = gg_now + ylab(expression("Crown area"~"("~m^2~m-2~")"))
+gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+gg_now = gg_now + theme( legend.position   = "right"
+                         , legend.text=element_text(size=gg_ptsz)
+                         , axis.text.x       = element_blank()
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.15,"cm")
+                         ) #end theme
+gg_now = gg_now + guides(colour = guide_legend(ncol=1))
+   
+             
+for (d in sequence(ndevice)){
+    h_output = paste0("allomeffects_canopycover.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot      = gg_now
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_widthn*0.75
+                    , height    = gg_height*0.75
+                    , units     = gg_units
+                    , dpi       = gg_depth
+                    )
+   }
+
+
+
+```
+
 
 
 
@@ -1810,7 +2047,7 @@ survi_400 = survi_co2$value
 
 delta_co2 = hlm1d                                          %>% 
             mutate(case_ens = paste0(case,"_",ens_label))  %>% 
-            filter(case_ens %in% c(survi_280,survi_400))   %>% 
+            #filter(case_ens %in% c(survi_280,survi_400))   %>% 
             dplyr::select(case,ens_label,case_ens,time
                          ,fates_gpp,fates_vegc_aboveground
                          ,elai,fsh,eflx_lh_tot)            %>% 
@@ -1826,20 +2063,20 @@ delta_co2 = hlm1d                                          %>%
 
 deltaR_co2 = delta_co2                                                          %>% 
             group_by(alom_grp,ens_label,time)                                   %>% 
-            mutate(fates_gpp                 = if_else(fates_gpp_400==0
-                                                      ,0
+            mutate(fates_gpp                 = ifelse(fates_gpp_400==0
+                                                      ,NA
                                                       ,(fates_gpp_400-fates_gpp_280)/fates_gpp_400)
-                     ,elai                   = if_else(elai_400==0
-                                                      ,0
+                     ,elai                   = ifelse(elai_400==0
+                                                      ,NA
                                                       ,(elai_400-elai_280)/elai_400)
-                     ,fates_vegc_aboveground = if_else(fates_vegc_aboveground_400==0
-                     ,0
+                     ,fates_vegc_aboveground = ifelse(fates_vegc_aboveground_400==0
+                     ,NA
                      ,(fates_vegc_aboveground_400-fates_vegc_aboveground_280)/fates_vegc_aboveground_400) 
-                     ,fsh                    = if_else(fsh_400==0
-                                                      ,0
+                     ,fsh                    = ifelse(fsh_400==0
+                                                      ,NA
                                                      ,(fsh_400-fsh_280)/fsh_400)
-                    ,eflx_lh_tot            = (if_else(eflx_lh_tot_400==0
-                                                      ,0
+                    ,eflx_lh_tot            = (ifelse(eflx_lh_tot_400==0
+                                                      ,NA
                                                       ,(eflx_lh_tot_400-eflx_lh_tot_280)/eflx_lh_tot_400)))%>%
             ungroup()                            %>% 
             dplyr::select(alom_grp,ens_label,time
@@ -1898,7 +2135,7 @@ for (h in delta_loop){
    gg_now = gg_now + xlab(element_blank())
    gg_now = gg_now + ylab(desc.unit(desc=paste0('delta*',h_short),unit=untab[[h_unit]],dxpr=TRUE))
    #gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
-   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
    gg_now = gg_now + theme( legend.position   = "right"
                          , legend.text=element_text(size=gg_ptsz)
                          , axis.text.x        = element_text( size   = gg_ptsz
@@ -1930,6 +2167,89 @@ for (h in delta_loop){
 
 # If sought, plot images on screen
 if (gg_screen) gg_delta
+
+
+##2. BOXPLOT comparing means
+
+plot_co2 =   hlm1d                                                   %>% 
+             mutate(case_ens = paste0(case,"_",ens_label))           %>% 
+             dplyr::select(case,ens_label,case_ens,time
+                          ,fates_gpp,fates_vegc_aboveground
+                          ,elai,fsh,eflx_lh_tot)                     %>% 
+             mutate(allom_grp= case_when(case %in% c("1","4") ~ "AVBA"
+                                        ,case %in% c("2","5") ~ "BRDI"
+                                        ,case %in% c("3","6") ~ "GENL")
+                  ,co2_grp   = case_when(case %in% c("1","2","3") ~ "280 ppm"
+                                        ,case %in% c("4","5","6") ~ "400 ppm")
+                    )                                                %>% 
+             mutate(month = month(time))                             %>% 
+#             filter(month %in% growing_sea)                          %>% 
+             group_by(case,ens_label,case_ens,allom_grp,co2_grp)     %>% 
+             dplyr::select(-c(time,month))                           %>% 
+             summarize_all(mean,na.rm=TRUE)                          %>% 
+             ungroup()
+
+co2_loop = which(hlm1dvar$vnam %in% hlm_var)
+
+gg_co2   = list()
+for (h in co2_loop){
+   h_vnam   = hlm1dvar$vnam[h] 
+   h_desc   = hlm1dvar$desc [h]
+   h_short  = hlm1dvar$short[h]
+   h_unit   = hlm1dvar$unit [h]
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+
+   df_now        = plot_co2
+
+   gg_now = ggboxplot(data=df_now,x="co2_grp",y=h_vnam,facet.by="allom_grp",fill="co2_grp",show.legend=TRUE)
+                             
+   gg_now = gg_now + stat_compare_means(aes_string(x="co2_grp",y=h_vnam),method="t.test",ref.group = "280 ppm",
+                                        label = "p.signif",hide.ns=TRUE,size=4.2,label.y.npc=0.97)
+   
+   gg_now = gg_now + scale_fill_manual(name="",values=c("white","grey"))
+   #gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + labs(title="")
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme( legend.position   = "right"
+                         , legend.text=element_text(size=gg_ptsz)
+                         , axis.text.x       = element_blank()
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length = unit(-0.15,"cm")
+                         ) #end theme
+  gg_now = gg_now + guides(colour = guide_legend(ncol=1))
+   
+  gg_co2[[h_vnam]] = gg_now      
+
+}
+
+gg_co2_reorder = list(gg_co2$fates_gpp,gg_co2$elai,gg_co2$fates_vegc_aboveground,gg_co2$eflx_lh_tot,gg_co2$fsh)
+gg_patch = wrap_plots(gg_co2_reorder)
+gg_patch = gg_patch + guide_area() + plot_layout(guides="collect")
+gg_patch = gg_patch + plot_annotation(tag_levels = "a", title = "")
+  
+ 
+# Save plots.
+for (d in sequence(ndevice)){
+    h_output = paste0("co2ffects_allpeak.",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot      = gg_patch
+                    , device    = gg_device[d]
+                    , path      = secy_path
+                    , width     = gg_widthn*0.75
+                    , height    = gg_height*0.8
+                    , units     = gg_units
+                    , dpi       = gg_depth
+                    )
+   }
+
+
+# If sought, plot images on screen
+if (gg_screen) gg_patch
 
 
 ```
@@ -2031,6 +2351,9 @@ if (gg_screen) gg_emean
 
 
 ```
+
+
+
 
 
 
@@ -2280,7 +2603,7 @@ max_survi   = survi_mmean                                                   %>%
                dplyr::select(all_of(c("case","ens_label",asses_vars)))      %>% 
                group_by(case,ens_label)                                     %>% 
                summarize_all(max,na.rm=TRUE)                                %>% 
-               ungroup()
+               ungroup()              
 
 max_all     = all_mmean                                                     %>% 
                dplyr::select(all_of(c("case","ens_label",asses_vars)))      %>% 
@@ -2291,7 +2614,7 @@ max_all     = all_mmean                                                     %>%
 mmean_lh      = hlm1d                                                       %>% 
               dplyr::select(case,ens_label,time,eflx_lh_tot)                %>% 
               mutate(month=month(time))                                     %>% 
-              select(-time)                                                 %>% 
+              dplyr::select(-time)                                          %>% 
               group_by(case,ens_label,month)                                %>% 
               summarize_all(mean,na.rm=TRUE)                                %>% 
               ungroup()                                                     %>% 
@@ -2299,13 +2622,13 @@ mmean_lh      = hlm1d                                                       %>%
 
 max_lhall    = mmean_lh                                                     %>% 
                group_by(case,ens_label)                                     %>% 
-               select(-c(month,case_ens))                                   %>% 
+               dplyr::select(-c(month,case_ens))                            %>% 
                summarize_all(max,na.rm=TRUE)                                %>% 
                ungroup()
 max_lhsur    = mmean_lh                                                     %>% 
                filter(case_ens %in% survi_label)                            %>% 
                group_by(case,ens_label)                                     %>% 
-               select(-c(month,case_ens))                                   %>% 
+               dplyr::select(-c(month,case_ens))                            %>% 
                summarize_all(max,na.rm=TRUE)                                %>% 
                ungroup()
  
@@ -2337,13 +2660,13 @@ gs_all     = all_mmean                                                      %>%
 gs_lhall    = mmean_lh                                                      %>% 
               filter(month %in% gs_month)                                   %>% 
               group_by(case,ens_label)                                      %>% 
-              select(-c(month,case_ens))                                    %>% 
+              dplyr::select(-c(month,case_ens))                             %>% 
               summarize_all(mean,na.rm=TRUE)                                %>% 
               ungroup()
 gs_lhsur    = mmean_lh                                                      %>% 
                filter(case_ens %in% survi_label & month %in% gs_month)      %>% 
                group_by(case,ens_label)                                     %>% 
-               select(-c(month,case_ens))                                   %>% 
+               dplyr::select(-c(month,case_ens))                            %>% 
                summarize_all(mean,na.rm=TRUE)                               %>% 
                ungroup()
 gsall_sens  = gs_all                                        %>% 
@@ -2368,13 +2691,13 @@ ss_all     = all_mmean                                                      %>%
 ss_lhall    = mmean_lh                                                      %>% 
               filter(month %in% ss_month)                                   %>% 
               group_by(case,ens_label)                                      %>% 
-              select(-c(month,case_ens))                                    %>% 
+              dplyr::select(-c(month,case_ens))                             %>% 
               summarize_all(mean,na.rm=TRUE)                                %>% 
               ungroup()
 ss_lhsur    = mmean_lh                                                      %>% 
                filter(case_ens %in% survi_label & month %in% ss_month)      %>% 
                group_by(case,ens_label)                                     %>% 
-               select(-c(month,case_ens))                                   %>% 
+               dplyr::select(-c(month,case_ens))                            %>% 
                summarize_all(mean,na.rm=TRUE)                               %>% 
                ungroup()
 ssall_sens  = ss_all                                        %>% 
@@ -2399,13 +2722,13 @@ ds_all     = all_mmean                                                      %>%
 ds_lhall    = mmean_lh                                                      %>% 
               filter(month %in% ds_month)                                   %>% 
               group_by(case,ens_label)                                      %>% 
-              select(-c(month,case_ens))                                    %>% 
+              dplyr::select(-c(month,case_ens))                             %>% 
               summarize_all(mean,na.rm=TRUE)                                %>% 
               ungroup()
 ds_lhsur    = mmean_lh                                                      %>% 
                filter(case_ens %in% survi_label & month %in% ds_month)      %>% 
                group_by(case,ens_label)                                     %>% 
-               select(-c(month,case_ens))                                   %>% 
+               dplyr::select(-c(month,case_ens))                            %>% 
                summarize_all(mean,na.rm=TRUE)                               %>% 
                ungroup()
 dsall_sens  = ds_all                                        %>% 
@@ -2425,17 +2748,63 @@ maxsur_sens  = maxsur_sens                                        %>%
 maxall_sens  = maxall_sens                                        %>% 
                left_join(param_all,by=c("case","ens_label"))
 gssur_sens   = gssur_sens                                        %>% 
-               left_join(param_survi,by=c("case","ens_label"))
+               left_join(param_survi,by=c("case","ens_label"))   %>% 
+               mutate(co2_trt = ifelse(case %in% c(1,2,3), "low","high")
+                     ,allom_grp = case_when(case %in% c(1,4) ~ "AVBA"
+                                           ,case %in% c(2,5) ~ "BRDI"
+                                           ,case %in% c(3,6) ~ "GENL"))
+
 gsall_sens   = gsall_sens                                        %>% 
                left_join(param_all,by=c("case","ens_label"))
 sssur_sens   = sssur_sens                                        %>% 
-               left_join(param_survi,by=c("case","ens_label"))
+               left_join(param_survi,by=c("case","ens_label"))   %>% 
+               mutate(co2_trt = ifelse(case %in% c(1,2,3), "low","high")
+                     ,allom_grp = case_when(case %in% c(1,4) ~ "AVBA"
+                                           ,case %in% c(2,5) ~ "BRDI"
+                                           ,case %in% c(3,6) ~ "GENL"))
+
+
 ssall_sens   = ssall_sens                                        %>% 
                left_join(param_all,by=c("case","ens_label"))
 dssur_sens   = dssur_sens                                        %>% 
-               left_join(param_survi,by=c("case","ens_label"))
+               left_join(param_survi,by=c("case","ens_label"))   %>% 
+               mutate(co2_trt = ifelse(case %in% c(1,2,3), "low","high")
+                     ,allom_grp = case_when(case %in% c(1,4) ~ "AVBA"
+                                           ,case %in% c(2,5) ~ "BRDI"
+                                           ,case %in% c(3,6) ~ "GENL"))
+
 dsall_sens   = dsall_sens                                        %>% 
                left_join(param_all,by=c("case","ens_label"))
+
+##3. mean value of all ensembles and only survived ensembles
+lhsur_mean  = hlm1d                                         %>% 
+              mutate(case_ens=paste0(case,"_",ens_label))   %>% 
+              filter(case_ens %in% survi_label)             %>% 
+              group_by(case_ens)                            %>% 
+              summarize(eflx_lh_tot = mean(eflx_lh_tot))    %>% 
+              ungroup()         
+survi_mean    = survi_mean                           %>% 
+                left_join(lhsur_mean,by="case_ens")  %>% 
+                left_join(param_survi,by=c("case","ens_label","case_ens")) %>% 
+                mutate(co2_trt = ifelse(case %in% c(1,2,3), "low","high")
+                     ,allom_grp = case_when(case %in% c(1,4) ~ "AVBA"
+                                           ,case %in% c(2,5) ~ "BRDI"
+                                           ,case %in% c(3,6) ~ "GENL"))
+
+lh_mean      = hlm1d                                         %>% 
+               mutate(case_ens=paste0(case,"_",ens_label))   %>% 
+               group_by(case_ens)                            %>% 
+               summarize(eflx_lh_tot = mean(eflx_lh_tot))    %>% 
+               ungroup()    
+
+all_mean     = all_mean                            %>% 
+               left_join(lh_mean,by="case_ens")    %>% 
+               left_join(param_all,by=c("case","ens_label","case_ens")) %>% 
+               mutate(co2_trt = ifelse(case %in% c(1,2,3), "low","high")
+                     ,allom_grp = case_when(case %in% c(1,4) ~ "AVBA"
+                                           ,case %in% c(2,5) ~ "BRDI"
+                                           ,case %in% c(3,6) ~ "GENL"))
+    
 
 ```
 
@@ -2444,38 +2813,27 @@ dsall_sens   = dsall_sens                                        %>%
 
 
 
-```{r,"trait-model-ouputs-correlations",message=FALSE,fig.height=12, fig.width=14}
+```{r,label="parameter-variable-correlations",message=FALSE,fig.height=12, fig.width=14}
 
-
-cor_survi   = gssur_sens
-cor_allens  = gsall_sens
-type        = "growing"
-cor_survi   = cor_survi[c(1,3:13,15:32)] 
-cor_allens  = cor_allens[c(1,3:13,15:32)]
+cor_survi   = survi_mean
+cor_allens  = all_mean
+cor_survi   = cor_survi[,c(1,7,11:15,17:21,23:40)] 
+cor_survi   = cor_survi %>% filter(case %in% c(4,5,6))
+cor_allens  = cor_allens[,c(1,7,11:15,17:21,23:40)]
+cor_allens  = cor_allens %>% filter(case %in% c(4,5,6))
                
+loop_case = which(case_names %in% unique(cor_survi$case))
 
-
-for(c in sequence(ncase)){
+for(c in loop_case){
   case_now  = case_names[c]
-  desc_now  = case_desc[c]
+  desc_now  = substr(case_desc[c],1,4)
   survi_now = cor_survi                 %>% 
               filter(case == case_now)  %>% 
               dplyr::select(-case)
   all_now   = cor_allens                %>% 
               filter(case == case_now)  %>% 
               dplyr::select(-case)
-  
-  # pairs(survi_now) +
-  # theme_grey( base_size = 40, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5) +
-  # title(paste0(case_now,"_Survied")) +
-  # theme(legend.text=element_text(size=gg_ptszl)
-  #    ,axis.text.x = element_text( size   = gg_ptszl
-  #                                , margin = unit(rep(0.35,times=4),"cm"))#end element_text
-  #                               , axis.text.y= element_text( size   = gg_ptszl
-  #                                              , margin = unit(rep(0.35,times=4),"cm")
-  #                                              )#end element_text
-  #                                , axis.ticks.length = unit(-0.25,"cm")
-  #                                )
+
 
   corr_surviens     = cor(survi_now)
   p_sur             = cor.mtest(survi_now,conf.level=0.95, method="pearson")$p
@@ -2483,8 +2841,8 @@ for(c in sequence(ncase)){
   p_all             = cor.mtest(all_now,conf.level=0.95, method="pearson")$p
   
   cor_nams          = c("GPP","$ Mort[Cstar]","$ Mort[Hydro]","$ Mort[Term]",
-                        "$ Mort[Can]","$ Mort[Und]","AGB","LAI",":lambda*E",
-                        "$ Leaf[Dia]","$ Leaf[Tunovr]","SLA","vcmax","$ BB[incpt]",
+                        "$ Mort[Can]","$ Mort[Und]","AGB","LAI","LH",
+                        "$ Leaf[Dia]","$ Leaf[Tunovr]","$ SLA[top]","$ Vc[max]","$ BB[incpt]",
                         "$ BB[slope]","LNC","$ Recruit[DBH]", "$ Recruit[Alloc]",
                         "$ Recruit[hgt]", "$ C[Storage]","$ SWC[Phen]","smpsc",
                         "smpso","$ Root[a]","$ Root[b]","$ Mort[hyd-scala]",
@@ -2498,9 +2856,9 @@ for(c in sequence(ncase)){
   colnames(p_all) = cor_nams
   rownames(p_all) = cor_nams
   
-  f_output = paste0(desc_now,"_",type,"_correlation-all.png")
+  f_output = paste0(desc_now,"_","allmean_correlation.png")
   png(file=file.path(plot_main,f_output),
-  width=13,height=8,units="in",res=600)
+  width=6.5,height=6.5,units="in",res=600)
 
   corrplot(corr_allens
           ,method      = "ellipse"
@@ -2508,22 +2866,22 @@ for(c in sequence(ncase)){
           ,p.mat       = p_all
           ,sig.level   = 0.05
           ,insig       = "blank"
-          ,addCoef.col = "grey50"
-          ,title = paste(desc_now,type,"all ensembles",sep=" ")
+          #,addCoef.col = "grey50"
+          ,title = desc_now
           ,mar=c(0,0,1,0)
           #,addCoefasPercent=TRUE
           #,cl.pos="n"
           ,order = "original"
-         #,diag=FALSE
+          ,diag=FALSE
           ,number.cex=0.55
           ,tl.cex = 1
           ,tl.col="black"
           ,cl.cex=1)
   dev.off()
 
-  f_output=paste0(desc_now,"_",type,"_correlation-survi.png")
+  f_output=paste0(desc_now,"_","survimean-correlation.png")
   png(file=file.path(plot_main,f_output),
-     width=13,height=8,units="in",res=600)
+     width=6.5,height=6.5,units="in",res=600)
 
   corrplot(corr_surviens
           ,method      = "ellipse"
@@ -2531,11 +2889,11 @@ for(c in sequence(ncase)){
           ,p.mat       = p_sur
           ,sig.level   = 0.05
           ,insig       = "blank"
-          ,addCoef.col = "grey50"
-          ,title       = paste(desc_now,type,"survived ensembles",sep=" ")
+          #,addCoef.col = "grey50"
+          ,title       = desc_now
           ,mar         = c(0,0,1,0)
           ,order       = "original"
-          #,diag  = FALSE
+          ,diag        = FALSE
           ,number.cex  = 0.55
           ,tl.cex      = 1
           ,tl.col      ="black"
@@ -2555,15 +2913,21 @@ dev.off()
 
 ```{r,label="variance-decomp-main",message=FALSE}
 
+var_plot=FALSE
+
 sens_main = matrix( data=NA_real_
                   , nrow=n_var*ncase
                   , ncol=n_param+1
                   , dimnames = list(rep(asses_vars,time=ncase),c(pars,"case")))
 
 
+lst_col = ncol(sens_main)
+
 sens_plot = list()
-sens_df   = sssur_sens #to select doing variance decompose for all or survived ensembles
-type      = "senescence"
+sens_df   = all_mean #to select doing variance decompose for all or survived ensembles
+type      = "ALLMean"
+
+## by case
 for(c in sequence(ncase)){
   case_now  = case_names[c]
   desc_now  = case_desc[c]
@@ -2572,15 +2936,17 @@ for(c in sequence(ncase)){
   var_now = asses_vars[v]
   for(p in sequence(n_param)){
     p_now   = pars[p] 
-    df_now  = sens_now %>% select(p_now,var_now)
+    df_now  = sens_now %>% dplyr::select(p_now,var_now)
     df_sort = df_now[do.call(order, df_now[, p_now]), ]
     x       = df_sort[[p_now]]
     y       = df_sort[[var_now]]
-    fit     = lm(y ~ bs(x,df=3))
+    #fit     = lm(y ~ bs(x,df=3))
+    fit     = lm(y ~ x)
     #fit = smooth.spline(y~x,df=4)
     moddf      = data.frame(x=x,y=y)
     moddf$pred = predict(fit,data.frame(x=x))
     #moddf$pred = fit$y
+    if(var_plot){
     gg_now = ggplot(data=moddf,aes(x,y))
     gg_now = gg_now + geom_point()
     gg_now = gg_now + geom_line(data=moddf,aes(x,pred),lwd=1)
@@ -2611,13 +2977,14 @@ for(c in sequence(ncase)){
                      )
   }
   sens_plot[[desc_now]][[var_now]][[p_now]]=gg_now
+    }#end of if(var_plot)
   if(c==1){
   sens_main[v,p]     = var(moddf$pred)/var(moddf$y)
-  sens_main[v,21]    = desc_now  
+  sens_main[v,lst_col]    = desc_now  
   }else{
   v_idx = (c-1)*n_var   + v
   sens_main[v_idx,p] = var(moddf$pred)/var(moddf$y)
-  sens_main[v_idx,21]    = desc_now 
+  sens_main[v_idx,lst_col]    = desc_now 
        }#end if else
  
       } #end p in sequence(n_param)   
@@ -2625,10 +2992,145 @@ for(c in sequence(ncase)){
 } # end c in seuqnece(ncase)
 
 
+## overall with survived ensembles
+
+pars_all = c(pars,"allom_grp")
+npar_all = length(pars_all)
+sensall_main = matrix( data=NA_real_
+                     , nrow=n_var
+                     , ncol=npar_all
+                     , dimnames = list(asses_vars,pars_all))
+sens_now = survi_mean
+type="SurviMean"
+sens_plot=list()
+for(v in sequence(n_var)){
+  var_now = asses_vars[v]
+  for(p in sequence(npar_all)){
+    p_now   = pars_all[p] 
+    df_now  = sens_now %>% dplyr::select(p_now,var_now)
+    df_sort = df_now[do.call(order, df_now[, p_now]), ]
+    x       = df_sort[[p_now]]
+    y       = df_sort[[var_now]]
+    #fit     = lm(y ~ bs(x,df=3))
+    fit     = lm(y ~ x)
+    moddf      = data.frame(x=x,y=y)
+    moddf$pred = predict(fit,data.frame(x=x))
+    #moddf$pred = fit$y
+    if(var_plot){
+    gg_now = ggplot(data=moddf,aes(x,y))
+    gg_now = gg_now + geom_point()
+    gg_now = gg_now + geom_line(data=moddf,aes(x,pred),lwd=1)
+    gg_now = gg_now + xlab(rlang::sym(p_now))
+    gg_now = gg_now + ylab(rlang::sym(var_now))
+    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
+    gg_now = gg_now + theme( legend.position   = "bottom"
+                         , axis.text.x       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , plot.title        = element_text( size = gg_ptsz)
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         )#end theme
+    
+    for (d in sequence(ndevice)){
+    f_output = paste(desc_now,"-",type,"-",var_now,"-",p_now,"-main.",gg_device[d])
+    dummy    = ggsave( filename = f_output
+                     , plot     = gg_now
+                     , device   = gg_device[d]
+                     , path     = sens_path
+                     , width    = gg_width
+                     , height   = gg_height
+                     , units    = gg_units
+                     , dpi      = gg_depth
+                     )
+  }
+  sens_plot[[var_now]][[p_now]]=gg_now
+    }#end of if(var_plot)
+  
+  sensall_main[v,p]     = var(moddf$pred)/var(moddf$y)
+  }
+}
+
+
+## overall by season
+sea_df   = c("gssur_sens","sssur_sens", "dssur_sens")  
+sea_desc = c("Growth", "Senescence", "Emergence")
+sea_num  = c(1L,2L,3L)
+names(sea_desc)=c("1","2","3")
+nsea     = length(sea_df)
+sensea_main = matrix( data=NA_real_
+                     , nrow=n_var*nsea
+                     , ncol=npar_all+1
+                     , dimnames = list(rep(asses_vars,times=nsea),c(pars_all, "season")))
+lst_col     = ncol(sensea_main)
+sens_plot=list()
+for(s in sequence(nsea)){
+  df       = sea_df[s]
+  type     = sea_num[s]
+  sens_now = get(df)
+ 
+
+for(v in sequence(n_var)){
+  var_now = asses_vars[v]
+  for(p in sequence(npar_all)){
+    p_now   = pars_all[p] 
+    df_now  = sens_now %>% dplyr::select(p_now,var_now)
+    df_sort = df_now[do.call(order, df_now[, p_now]), ]
+    x       = df_sort[[p_now]]
+    y       = df_sort[[var_now]]
+    fit     = lm(y ~ x)
+    moddf      = data.frame(x=x,y=y)
+    moddf$pred = predict(fit,data.frame(x=x))
+    if(var_plot){
+    gg_now = ggplot(data=moddf,aes(x,y))
+    gg_now = gg_now + geom_point()
+    gg_now = gg_now + geom_line(data=moddf,aes(x,pred),lwd=1)
+    gg_now = gg_now + xlab(rlang::sym(p_now))
+    gg_now = gg_now + ylab(rlang::sym(var_now))
+    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
+    gg_now = gg_now + theme( legend.position   = "bottom"
+                         , axis.text.x       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , plot.title        = element_text( size = gg_ptsz)
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         )#end theme
+    
+    for (d in sequence(ndevice)){
+    f_output = paste(desc_now,"-",type,"-",var_now,"-",p_now,"-main.",gg_device[d])
+    dummy    = ggsave( filename = f_output
+                     , plot     = gg_now
+                     , device   = gg_device[d]
+                     , path     = sens_path
+                     , width    = gg_width
+                     , height   = gg_height
+                     , units    = gg_units
+                     , dpi      = gg_depth
+                     )
+  }
+  sens_plot[[sens_now]][[var_now]][[p_now]]=gg_now
+    }#end of if(var_plot)
+  
+   if(s==1){
+  sensea_main[v,p]          = var(moddf$pred)/var(moddf$y)
+  sensea_main[v,lst_col]    = type  
+  }else{
+  v_idx = (s-1)*n_var   + v
+  sensea_main[v_idx,p] = var(moddf$pred)/var(moddf$y)
+  sensea_main[v_idx,lst_col] = type 
+       }#end if else
+  }
+}
+}
+
+
+
 ```
-
-
-
 
 
 
@@ -2648,34 +3150,30 @@ sens_min = matrix( data=NA_real_
                   ,nrow=n_var*ncase
                   ,ncol=n_param+1
                   ,dimnames = list(rep(asses_vars,time=ncase),c(pars,"case")))
+lst_col = ncol(sens_min)
 sens_plot = list()
-
+type="bycase_SurMean"
 for(c in sequence(ncase)){
   case_now  = case_names[c]
   desc_now  = case_desc[c]
   sens_now  = sens_df   %>%  filter(case==case_now)
   for(v in sequence(n_var)){
   var_now = asses_vars[v]
-  #y       = sens_survi[[var_now]]
   y         = sens_now[[var_now]]
   for(p in sequence(n_param)){
     p_now   = pars[p] 
-    #x       = sens_survi[[p_now]]
     x       = sens_now[[p_now]]
     y_rsd   = y
     others  = pars[pars!=p_now]
     n_other = length(others)
     for(t in sequence(n_other)){
       other_var = others[t]
-      #x_other   = sens_survi[[other_var]]
       x_other   = sens_now[[other_var]]
       idx       = order(x_other)
       bs_x      = x_other[idx]
       bs_y      = y_rsd[idx]
-      fit       = lm(bs_y ~ bs(bs_x,df=3))
+      fit       = lm(bs_y ~ bs_x)
       pred      = predict(fit,data.frame(bs_x=bs_x))
-      #fit       = smooth.spline(bs_y ~ bs_x,df=4)
-      #pred      = fit$y
       pred_revers = pred[idx]
       y_rsd     = y_rsd - pred_revers
     }#end t in sequence(n_other)
@@ -2683,10 +3181,8 @@ for(c in sequence(ncase)){
     x_sort    = x[x_idx]
     yrsd_sort = y_rsd[x_idx]
     y_sort    = y[x_idx]
-    fit_x     = lm(yrsd_sort ~ bs(x_sort,df=3))
+    fit_x     = lm(yrsd_sort ~ x_sort)
     x_pred    = predict(fit_x,data.frame(x_sort = x_sort))
-    #fit_x     = smooth.spline(yrsd_sort ~ x_sort,df=4)
-    #x_pred    = fit_x$y
     plotdf    = data.frame(x=x_sort,y=yrsd_sort,pred=x_pred,orig_y = y_sort)
     var_min   = var(plotdf$pred)/var(plotdf$orig_y)
     
@@ -2699,7 +3195,7 @@ for(c in sequence(ncase)){
      sens_min[v_idx,21] = desc_now
     } #end if else
     
-    
+   if(var_plot){
     gg_now = ggplot(data=plotdf,aes(x,y))
     gg_now = gg_now + geom_point()
     gg_now = gg_now + geom_line(data=plotdf,aes(x,pred),lwd=1)
@@ -2730,9 +3226,170 @@ for(c in sequence(ncase)){
                   )
      } #end d in sequence(ndevice)
   sens_plot[[desc_now]][[var_now]][[p_now]]=gg_now
+    } #end of if(var_plot)
    } #end p in sequence(n_param
   } #end v in sequence(n_var)
 } #end c in sequence(ncase)
+
+
+##overall
+sens_now = survi_mean
+type = "whole-SurMean"
+sensall_min = matrix( data=NA_real_
+                    ,nrow=n_var
+                    ,ncol=npar_all
+                    ,dimnames = list(asses_vars,pars_all))
+sens_plot=list()
+ for(v in sequence(n_var)){
+  var_now   = asses_vars[v]
+  y         = sens_now[[var_now]]
+  for(p in sequence(npar_all)){
+    p_now   = pars_all[p]  
+    x       = sens_now[[p_now]]
+    y_rsd   = y
+    others  = pars_all[pars_all!=p_now]
+    n_other = length(others)
+    for(t in sequence(n_other)){
+      other_var = others[t]
+      x_other   = sens_now[[other_var]]
+      idx       = order(x_other)
+      bs_x      = x_other[idx]
+      bs_y      = y_rsd[idx]
+      fit       = lm(bs_y ~ bs_x)
+      pred      = predict(fit,data.frame(bs_x=bs_x))
+      pred_revers = pred[idx]
+      y_rsd     = y_rsd - pred_revers
+    }#end t in sequence(n_other)
+    x_idx     = order(x)
+    x_sort    = x[x_idx]
+    yrsd_sort = y_rsd[x_idx]
+    y_sort    = y[x_idx]
+    fit_x     = lm(yrsd_sort ~ x_sort)
+    x_pred    = predict(fit_x,data.frame(x_sort = x_sort))
+    plotdf    = data.frame(x=x_sort,y=yrsd_sort,pred=x_pred,orig_y = y_sort)
+    var_min   = var(plotdf$pred)/var(plotdf$orig_y)
+    sensall_min[v,p] = var_min 
+   if(var_plot){
+    gg_now = ggplot(data=plotdf,aes(x,y))
+    gg_now = gg_now + geom_point()
+    gg_now = gg_now + geom_line(data=plotdf,aes(x,pred),lwd=1)
+    gg_now = gg_now + xlab(rlang::sym(p_now))
+    gg_now = gg_now + ylab(paste0(var_now,"_residual"))
+    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
+    gg_now = gg_now + theme( legend.position   = "bottom"
+                         , axis.text.x       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , plot.title        = element_text( size = gg_ptsz)
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         )#end theme
+    
+    for (d in sequence(ndevice)){
+    f_output = paste0(desc_now,"-",type,"-",var_now,"-",p_now,"-varmin.",gg_device[d])
+    dummy = ggsave( filename = f_output
+                  , plot     = gg_now
+                  , device   = gg_device[d]
+                  , path     = sens_path
+                  , width    = gg_width
+                  , height   = gg_height
+                  , units    = gg_units
+                  , dpi      = gg_depth
+                  )
+     } #end d in sequence(ndevice)
+  sens_plot[[var_now]][[p_now]]=gg_now
+    } #end of if(var_plot)
+   } #end p in sequence(n_param
+  } #end v in sequence(n_var)
+
+
+### all by season
+
+sensea_min = matrix( data=NA_real_
+                    ,nrow=n_var*nsea
+                    ,ncol=npar_all+1
+                    ,dimnames = list(rep(asses_vars,times=nsea),c(pars_all,"season")))
+
+lst_col = ncol(sensea_min)
+sens_plot=list()
+for(s in sequence(nsea)){
+  df       = sea_df[s]
+  type     = sea_num[s]
+  sens_now = get(df)
+  
+ for(v in sequence(n_var)){
+  var_now   = asses_vars[v]
+  y         = sens_now[[var_now]]
+  for(p in sequence(npar_all)){
+    p_now   = pars_all[p]  
+    x       = sens_now[[p_now]]
+    y_rsd   = y
+    others  = pars_all[pars_all!=p_now]
+    n_other = length(others)
+    for(t in sequence(n_other)){
+      other_var = others[t]
+      x_other   = sens_now[[other_var]]
+      idx       = order(x_other)
+      bs_x      = x_other[idx]
+      bs_y      = y_rsd[idx]
+      fit       = lm(bs_y ~ bs_x)
+      pred      = predict(fit,data.frame(bs_x=bs_x))
+      pred_revers = pred[idx]
+      y_rsd     = y_rsd - pred_revers
+    }#end t in sequence(n_other)
+    x_idx     = order(x)
+    x_sort    = x[x_idx]
+    yrsd_sort = y_rsd[x_idx]
+    y_sort    = y[x_idx]
+    fit_x     = lm(yrsd_sort ~ x_sort)
+    x_pred    = predict(fit_x,data.frame(x_sort = x_sort))
+    plotdf    = data.frame(x=x_sort,y=yrsd_sort,pred=x_pred,orig_y = y_sort)
+    var_min   = var(plotdf$pred)/var(plotdf$orig_y)
+    if(s==1){
+     sensea_min[v,p] = var_min 
+     sensea_min[v,lst_col]=type
+    }else{
+     v_idx = (s-1)*n_var + v
+     sensea_min[v_idx,p]  = var_min
+     sensea_min[v_idx,lst_col] = type
+    } #end if else
+   if(var_plot){
+    gg_now = ggplot(data=plotdf,aes(x,y))
+    gg_now = gg_now + geom_point()
+    gg_now = gg_now + geom_line(data=plotdf,aes(x,pred),lwd=1)
+    gg_now = gg_now + xlab(rlang::sym(p_now))
+    gg_now = gg_now + ylab(paste0(var_now,"_residual"))
+    gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
+    gg_now = gg_now + theme( legend.position   = "bottom"
+                         , axis.text.x       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.text.y       = element_text( size   = gg_ptsz
+                                                           , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , plot.title        = element_text( size = gg_ptsz)
+                         , axis.ticks.length = unit(-0.25,"cm")
+                         )#end theme
+    
+    for (d in sequence(ndevice)){
+    f_output = paste0(desc_now,"-",type,"-",var_now,"-",p_now,"-varmin.",gg_device[d])
+    dummy = ggsave( filename = f_output
+                  , plot     = gg_now
+                  , device   = gg_device[d]
+                  , path     = sens_path
+                  , width    = gg_width
+                  , height   = gg_height
+                  , units    = gg_units
+                  , dpi      = gg_depth
+                  )
+     } #end d in sequence(ndevice)
+  sens_plot[[sens_now]][[var_now]][[p_now]]=gg_now
+    } #end of if(var_plot)
+   } #end p in sequence(n_param
+  } #end v in sequence(n_var)
+}
 
 
 ```
@@ -2744,6 +3401,8 @@ for(c in sequence(ncase)){
 
 ```{r,label="param-effects-rank",fig.height=9,fig.width=11.25}
 
+
+#by case
 var                  = rownames(sens_main)
 sens_madf            = as_tibble(sens_main)
 sens_madf$model_var  = var
@@ -2764,49 +3423,56 @@ par_label            = gsub(pattern="\\$ ", replacement="",x=par_label)
 sens_decom           = sens_decom                                                %>% 
                        mutate( var_decomp = round(as.numeric(var_decomp)*100,1)
                              , label      = rep(par_label,time=n_var*ncase*2)) 
+
+slec_var             = c("fates_gpp","fates_lai","fates_vegc_aboveground","eflx_lh_tot",
+                         "fates_mortality_cstarv","fates_mortality_hydraulic")
+decom_part           = sens_decom                     %>% 
+                       filter(model_var %in% slec_var & type=="main")
   
 var_label            = c("Growth primary productivity"
                         ,"Leaf area index"
                         ,"Latent heat flux"
-                        ,"Canopy mortality"
+                       # ,"Canopy mortality"
                         ,"Carbon starvation mortality"
                         ,"Hydraulic mortality"
-                        ,"Termination mortality"
-                        ,"Understory mortality"
+                       # ,"Termination mortality"
+                       # ,"Understory mortality"
                         , "Aboveground biomass")
 names(var_label)     = c("fates_gpp"
                         ,"fates_lai"
                         ,"eflx_lh_tot"
-                        ,"fates_mortality_canopy"
+                      #  ,"fates_mortality_canopy"
                         ,"fates_mortality_cstarv"
                         ,"fates_mortality_hydraulic"
-                        ,"fates_mortality_termination"
-                        ,"fates_mortality_ustory"
+                      #  ,"fates_mortality_termination"
+                      #  ,"fates_mortality_ustory"
                         ,"fates_vegc_aboveground")
 
 
 decomp_plot=list()
+type = "bycase-SurMean"
 for(c in sequence(ncase)){
   desc_now   = case_desc[c]
-  decomp_now = sens_decom %>% filter(case==desc_now)
+  decomp_now = decom_part %>% filter(case==desc_now)
   
   gg_now = ggplot(decomp_now,aes(var_decomp,label)) 
-  gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp,colour=type)
-                                  ,size=4, alpha=0.7)#,position = position_dodge(width = 0.2))
-  gg_now = gg_now + scale_colour_manual(values = ens_colour[c(1,3)])
+  #gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp,colour=type)
+  #                                ,size=4, alpha=0.7)#,position = position_dodge(width = 0.2))
+  gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp),size=5)
+  #gg_now = gg_now + scale_colour_manual(values = ens_colour[c(1,3)])
   gg_now = gg_now + facet_wrap(.~ model_var,labeller=labeller(model_var=var_label))
-  gg_now = gg_now + labs(title = paste(desc_now,type,sep="-"))
+  #gg_now = gg_now + labs(title = paste(desc_now,type,sep="-"))
   gg_now = gg_now + xlab("Variance explained (%)")
   gg_now = gg_now + ylab(element_blank())
   gg_now = gg_now + scale_y_discrete(labels = scales::label_parse())
-  gg_now = gg_now + theme_grey( base_size = gg_ptsz
+  gg_now = gg_now + theme_bw( base_size = gg_ptsz*1.5
                               , base_family = "Helvetica"
                               , base_line_size = 0.5
                               , base_rect_size = 0.5)
   gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz
                                                       , margin = unit(rep(0.35,times=4),"cm")
                                                       )#end element_text
-                          , axis.text.y = element_text( size   = gg_ptsz-5
+                          , axis.text.y = element_text( size   = gg_ptsz
                                                       , margin = unit(rep(0.35,times=4),"cm")
                                                       )#end element_text
                           , axis.ticks.length = unit(-0.25,"cm")
@@ -2819,15 +3485,255 @@ for(c in sequence(ncase)){
                      , plot     = gg_now
                      , device   = gg_device[d]
                      , path     = plot_main
-                     , width    = gg_widthn
-                     , height   = gg_height*1.5
+                     , width    = gg_widthn*0.7
+                     , height   = gg_height*0.8
                      , units    = gg_units
-                     , dpi      = gg_depth
+                    # , dpi      = gg_depth
                      )
      } #end d in sequence(ndevice)
  decomp_plot[[desc_now]] = gg_now
 }
 if(gg_screen) decomp_plot
+
+
+## overall
+type = "SurviMean"
+var                  = rownames(sensall_main)
+sensall_madf         = as_tibble(sensall_main)
+sensall_madf$model_var  = var
+sensall_madf$type       = "main"
+
+var                  = rownames(sensall_min)
+sensall_midf         = as_tibble(sensall_min)
+sensall_midf$model_var  = var
+sensall_midf$type       = "min"
+
+sensall_decom           = rbind(sensall_madf,sensall_midf)
+sensall_decom           = sensall_decom                                        %>%  
+                          pivot_longer(cols = turb_diameter:allom_grp
+                                   ,names_to  = "parameter"
+                                   ,values_to = "var_decomp")   
+
+par_label            = c(cor_nams[10:29],"Allometry")
+par_label            = gsub(pattern="\\$ ", replacement="",x=par_label)
+
+sensall_decom        = sensall_decom                                                %>% 
+                       mutate( var_decomp = round(as.numeric(var_decomp)*100,1)
+                             , label      = rep(par_label,time=n_var*2)) 
+
+slec_var             = c("fates_gpp","fates_lai","fates_vegc_aboveground","eflx_lh_tot")
+decomall_part           = sensall_decom                                                          %>% 
+                          filter(model_var %in% slec_var & type=="main" )#& parameter!="co2_trt")
+  
+loop_list   = which(hlm1dvar$vnam %in% slec_var)
+decomp_plot=list()
+for(d in loop_list){
+   h_vnam   = hlm1dvar$vnam [d] 
+   h_desc   = hlm1dvar$desc [d]
+   h_short  = hlm1dvar$short[d]
+   h_unit   = hlm1dvar$unit [d]
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+   decomp_now = decomall_part %>% filter(model_var==h_vnam)
+   decomp_now = decomp_now %>% arrange(var_decomp)
+   decomp_now = decomp_now %>% mutate(label=factor(label,levels=unique(label))) %>% filter(var_decomp>1)
+   
+   gg_now = ggplot(decomp_now,aes(var_decomp,label)) 
+  #gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp,colour=type)
+  #                                ,size=4, alpha=0.7)#,position = position_dodge(width = 0.2))
+  gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp),size=5)
+  #gg_now = gg_now + scale_colour_manual(values = ens_colour[c(1,3)])
+  #gg_now = gg_now + facet_wrap(.~ model_var,labeller=labeller(model_var=var_label))
+  #gg_now = gg_now + ggtitle(parse(text=h_short))
+  gg_now = gg_now + ggtitle(h_desc)
+  gg_now = gg_now + xlab("Variance explained (%)")
+  gg_now = gg_now + ylab(element_blank())
+  gg_now = gg_now + scale_y_discrete(labels = scales::label_parse())
+  gg_now = gg_now + theme_bw( base_size = gg_ptsz*1.5
+                              , base_family = "Helvetica"
+                              , base_line_size = 0.5
+                              , base_rect_size = 0.5)
+  gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.text.y = element_text( size   = gg_ptsz
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.ticks.length = unit(-0.25,"cm")
+                          , legend.position   = "none"
+                          , legend.direction  = "horizontal"
+                          , plot.title=element_text(hjust=0.5)
+                          , plot.margin=unit(c(0,0,0,0),"mm")
+                          )#end theme
+
+  
+decomp_plot[[h_vnam]] = gg_now
+}
+
+
+decomp_plot_reorder = list(decomp_plot$fates_gpp,decomp_plot$fates_lai,decomp_plot$fates_vegc_aboveground,decomp_plot$eflx_lh_tot)
+ lai_plot = decomp_plot$fates_lai
+ lh_plot  = decomp_plot$eflx_lh_tot
+gg_patch = wrap_plots(decomp_plot_reorder)
+gg_patch = gg_patch + guide_area() + plot_layout( guides="collect",ncol=2)
+gg_patch = gg_patch + plot_annotation(tag_level = "a",title = "")
+  for (d in sequence(ndevice)){
+    f_output = paste0(type,"-variance-decomp.",gg_device[d])
+    dummy    = ggsave( filename = f_output
+                     , plot     = gg_patch
+                     , device   = gg_device[d]
+                     , path     = plot_main
+                     , width    = gg_widthn
+                     , height   = gg_height*1.4
+                     , units    = gg_units
+                     , dpi      = 400
+                     )
+     } #end d in sequence(ndevice)
+
+
+if(gg_screen) gg_now
+
+
+### overall by season
+
+type="bysea-SurMean"
+var                  = rownames(sensea_main)
+sensea_madf          = as_tibble(sensea_main)
+sensea_madf$model_var  = var
+sensea_madf$type       = "main"
+
+var                  = rownames(sensea_min)
+sensea_midf          = as_tibble(sensea_min)
+sensea_midf$model_var  = var
+sensea_midf$type       = "min"
+
+sensea_decom           = rbind(sensea_madf,sensea_midf)
+sensea_decom           = sensea_decom                                        %>%  
+                          pivot_longer(cols = turb_diameter:allom_grp
+                                   ,names_to  = "parameter"
+                                   ,values_to = "var_decomp")   
+par_label            = c(cor_nams[10:29], "Allometry")
+par_label            = gsub(pattern="\\$ ", replacement="",x=par_label)
+
+sensea_decom        = sensea_decom                                                %>% 
+                       mutate( var_decomp = round(as.numeric(var_decomp)*100,1)
+                             , label      = rep(par_label,time=n_var*nsea*2)) 
+
+slec_var             = c("fates_gpp","fates_lai","fates_vegc_aboveground","eflx_lh_tot")
+decomsea_part           = sensea_decom                                                          %>% 
+                          filter(model_var %in% slec_var & type=="main" )#& parameter!="co2_trt")
+  
+loop_list   = which(hlm1dvar$vnam %in% slec_var)
+decomp_plot=list()
+for(d in loop_list){
+   h_vnam   = hlm1dvar$vnam [d] 
+   h_desc   = hlm1dvar$desc [d]
+   h_short  = hlm1dvar$short[d]
+   h_unit   = hlm1dvar$unit [d]
+   h_legend = v == 1
+   cat0("   - ",h_desc,".")
+   decomp_now = decomsea_part %>% filter(model_var==h_vnam)
+   decomp_now = decomp_now %>% mutate(label=factor(label,levels=unique(label))) %>% filter(var_decomp>5)
+   gg_now = ggplot(decomp_now,aes(var_decomp,label)) 
+   gg_now = gg_now + facet_wrap(.~season, labeller=labeller(season=sea_desc))
+   gg_now = gg_now + geom_linerange(aes(xmin=0,xmax=var_decomp),size=5)
+   gg_now = gg_now + ggtitle(h_desc)
+   gg_now = gg_now + xlab("Variance explained (%)")
+   gg_now = gg_now + ylab(element_blank())
+   gg_now = gg_now + scale_y_discrete(labels = scales::label_parse())
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz*1.5
+                              , base_family = "Helvetica"
+                              , base_line_size = 0.5
+                              , base_rect_size = 0.5)
+  gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.text.y = element_text( size   = gg_ptsz
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.ticks.length = unit(-0.25,"cm")
+                          , legend.position   = "none"
+                          , legend.direction  = "horizontal"
+                          , plot.title=element_text(hjust=0.5)
+                          , plot.margin=unit(c(0,0,0,0),"mm")
+                          )#end theme
+
+  
+decomp_plot[[h_vnam]] = gg_now
+}
+
+
+decomp_plot_reorder = list(decomp_plot$fates_gpp,decomp_plot$fates_lai,decomp_plot$fates_vegc_aboveground,decomp_plot$eflx_lh_tot)
+lai_plot = decomp_plot$fates_lai
+lh_plot  = decomp_plot$eflx_lh_tot
+gg_patch = wrap_plots(decomp_plot_reorder)
+gg_patch = gg_patch + guide_area() + plot_layout( guides="collect",ncol=2)
+gg_patch = gg_patch + plot_annotation(tag_level = "a",title = "")
+  for (d in sequence(ndevice)){
+    f_output = paste0(type,"-variance-decomp.",gg_device[d])
+    dummy    = ggsave( filename = f_output
+                     , plot     = gg_patch
+                     , device   = gg_device[d]
+                     , path     = plot_main
+                     , width    = gg_widthn*1.2
+                     , height   = gg_height*1.4
+                     , units    = gg_units
+                     , dpi      = 400
+                     )
+     } #end d in sequence(ndevice)
+
+
+if(gg_screen) gg_now
+
+
+  
+  
+## radial plot
+test = decomp_now %>% filter(model_var=="fates_gpp")
+test = test %>% arrange(desc(var_decomp))
+test = test %>% mutate(label=factor(label,levels=unique(label)))
+
+xgrid= c(0, 5, 10, 15, 20,25,30)
+p = ggplot(test, aes(label)) +
+  geom_hline(yintercept=xgrid, colour="grey80", size=0.6, linetype="dotted") +
+  geom_segment(data=data.frame(x=unique(test$label), y=0, yend=max(xgrid)),
+               aes(x=x, xend=x, y, yend=yend), colour='grey30', size=0.6,linetype="dotted",
+               position=position_nudge(x=0.5)) +
+  geom_segment(data=data.frame(x=0.5), x=0.5, xend=0.5, y=0, yend=max(xgrid), colour='grey30', size=0.6,linetype="dotted") +
+  #geom_col(aes(y=var_decomp), width=0.5, position="identity") +
+  geom_col(aes(y=var_decomp, fill=type), width=0.5, position="identity") +
+  #geom_errorbar(aes(ymin=var_decomp - conf, ymax=value + conf, colour=key), 
+  #              position=position_dodge(0.2), width=0.2) +
+  geom_text(aes(label=label,y=max(xgrid)), parse=TRUE, size=4, colour="grey30") +
+  annotate(y=xgrid, x=0, label=paste0(xgrid,"%"), geom="text", size=4,colour="grey30") +
+  coord_polar(start=-2*pi/22 * 0.5) + 
+  scale_y_continuous(limits=c(-20, max(xgrid)), expand=c(0,0)) +
+  expand_limits(y=-0.1, x=-0.5) +
+  theme_bw() + 
+  theme(panel.grid.major=element_blank(),
+        axis.text=element_blank(),
+        legend.title=element_blank(),
+        panel.border=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title=element_blank(), 
+        legend.position=c(0.5,0.5),
+        legend.text = element_text(size=15,color="grey30"),
+        plot.background=element_rect(colour=NA)) +
+  labs(fill="", colour="") + 
+  scale_fill_manual(values=ens_colour[3])
+  #scale_fill_manual(values=hcl(c(15,195), 100, 70)) 
+  #scale_colour_manual(values=hcl(c(15,195), 100, 40))
+f_output = paste0("GPP-parameter-effect.png")
+dummy    = ggsave( filename = f_output
+                 , plot     = p
+                 , device   = gg_device[d]
+                 , path     = plot_main
+                 , width    = gg_widthn*0.5
+                 , height   = gg_height*0.6
+                 , units    = gg_units
+                 , dpi      = gg_depth
+                     )
+
 
 ```
 
@@ -2837,6 +3743,7 @@ if(gg_screen) decomp_plot
 
 
 ```{r,label="visualize-parameter-effects"}
+
 lhsur_mmean  = hlm1d                                         %>% 
                dplyr::select(case,ens_label,time,eflx_lh_tot)%>% 
                mutate(month    = month(time)
@@ -2891,6 +3798,7 @@ plot_pareff = plot_pareff                                           %>%
                left_join(param_survi,by=c("case","ens_label"))        %>% 
                distinct()
  only_lh = only_lh                                                    %>% 
+           arrange(lh_peakT)                                          %>% 
            mutate(lh_peakT = factor(lh_peakT
                                   ,labels=c("March","April","May")))
 
@@ -2904,7 +3812,7 @@ gg_now = gg_now +  scale_colour_manual(labels = parse_format()
 gg_now = gg_now +  scale_shape_manual(values=c(13,16:17),name="Peak month")
 gg_now = gg_now +  labs(x=expression(Soil~water~content[Drought-Decid])
                        ,y=expression(Recruitment[Height-min]~"(m)"))
-gg_now = gg_now + theme_grey( base_size = gg_ptsz
+gg_now = gg_now + theme_bw( base_size = gg_ptsz
                               , base_family = "Helvetica"
                               , base_line_size = 0.5
                               , base_rect_size = 0.5)
@@ -2926,10 +3834,49 @@ dummy    = ggsave( filename = p_output
                     , width    = gg_width*0.65
                     , height   = gg_height
                     , units    = gg_units
-                    , dpi      = gg_depth
+                    #, dpi      = gg_depth
                     )
 
 if(gg_screen) gg_now
+
+
+gg_now = ggplot(only_lh,aes(phen_drough,recruit_height_min,colour=lh_grp)) 
+gg_now = gg_now +  geom_point(aes(shape=lh_peakT)) 
+gg_now = gg_now +  facet_wrap(.~case,labeller=labeller(case=case_desc)) 
+#gg_now = gg_now +  geom_boxplot()
+gg_now = gg_now +  scale_colour_manual(labels = parse_format()
+                                      ,values=ens_colour[c(1:3)]
+                                      ,name="Peak value")
+gg_now = gg_now +  scale_shape_manual(values=c(13,16:17),name="Peak month")
+gg_now = gg_now +  labs(x=expression(Soil~water~content[Drought-Decid])
+                       ,y=expression(Recruitment[Height-min]~"(m)"))
+gg_now = gg_now + theme_bw( base_size = gg_ptsz
+                              , base_family = "Helvetica"
+                              , base_line_size = 0.5
+                              , base_rect_size = 0.5)
+gg_now = gg_now +  theme( axis.text.x = element_text( size   = gg_ptsz
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.text.y = element_text( size   = gg_ptsz-5
+                                                      , margin = unit(rep(0.35,times=4),"cm")
+                                                      )#end element_text
+                          , axis.ticks.length = unit(-0.25,"cm")
+                          , legend.position   = "bottom"
+                          , legend.direction  = "horizontal"
+                          )#end theme
+p_output = paste0("LH-param-effects.",gg_device)
+dummy    = ggsave( filename = p_output
+                    , plot     = gg_now
+                    , device   = gg_device[d]
+                    , path     = plot_main
+                    , width    = gg_width*0.65
+                    , height   = gg_height
+                    , units    = gg_units
+                    #, dpi      = gg_depth
+                    )
+
+if(gg_screen) gg_now
+
 
 ```
 
@@ -3019,6 +3966,19 @@ ens_filt    = ens_filt                                   %>%
 ens_keep  = unique(ens_filt$case_ens)  
 
 
+### using RMSE
+model_rmse  = function(model, data){
+  rmse = sqrt(mean((model-data)^2))
+}
+
+
+agb_filt   = ens_filt                                   %>% 
+             group_by(case,ens_label)                   %>% 
+             summarize(agb_rmse = model_rmse(model=fates_vegc_aboveground_mod,
+                                             data = fates_vegc_aboveground))
+             
+
+
 
 
 ```
@@ -3069,26 +4029,26 @@ for (h in keep_loop){
                                 , show.legend = h_legend
                                 , colour      = "transparent"
                                 )
-   gg_now = gg_now + labs(title=h_desc)
+   gg_now = gg_now + labs(title="")
    gg_now = gg_now + scale_x_continuous( breaks = sequence(12))#end scale_x_continuous
-   gg_now = gg_now + xlab(element_blank())
+   if(h_vnam %in% c("eflx_lh_tot","fsh")){gg_now = gg_now + xlab("Month of year")}else{gg_now = gg_now + xlab(element_blank())}
    gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
-   gg_now = gg_now + theme_grey( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
-   gg_now = gg_now + theme(axis.text.x        = element_text( size   = gg_ptsz
+   gg_now = gg_now + theme_bw( base_size = gg_ptsz, base_family = "Helvetica",base_line_size= 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme(axis.text.x        = element_text( size  = gg_ptsz
                                                            , margin = unit(rep(0.35,times=4),"cm"))#end element_text
                          , axis.text.y       = element_text( size   = gg_ptsz
                                                            , margin = unit(rep(0.35,times=4),"cm")
                                                            )#end element_text
-                         , axis.ticks.length = unit(-0.25,"cm")
-                         , axis.title.y = element_text(size = gg_ptsz*0.9)
-                         , legend.text=element_text(size=gg_ptsz*0.7)
-                         , plot.title = element_text(size = gg_ptsz*0.95)
+                         , axis.ticks.length = unit(-0.15,"cm")
+                         , axis.title.y = element_text(size = gg_ptsz)
+                         , legend.text=element_text(size=gg_ptsz)
+                         , plot.title = element_text(size = gg_ptsz)
                          ) #end theme
    gg_keep[[h_vnam]] = gg_now   
   
    }
-  
-  gg_patch = wrap_plots(gg_keep)
+  gg_keep_reorder = list(gg_keep$fates_gpp,gg_keep$elai,gg_keep$fates_vegc_aboveground,gg_keep$eflx_lh_tot,gg_keep$fsh)
+  gg_patch = wrap_plots(gg_keep_reorder)
   gg_patch = gg_patch + guide_area() + plot_layout(guides="collect")
   gg_patch = gg_patch + plot_annotation(tag_levels = "a", title = "")
   
@@ -3099,10 +4059,10 @@ for (d in sequence(ndevice)){
                     , plot     = gg_patch
                     , device   = gg_device[d]
                     , path     = secy_path
-                    , width    = gg_width
-                    , height   = gg_height
+                    , width    = gg_widthn*0.9
+                    , height   = gg_height*0.8
                     , units    = gg_units
-                    , dpi      = gg_depth
+                    #, dpi      = gg_depth
                     )
 }
 
@@ -3117,6 +4077,8 @@ if (gg_screen) gg_patch
 
 
 ```
+
+
 
 
 
@@ -3136,15 +4098,16 @@ keep_fates   = survi_amean                                   %>%
                filter(case_ens %in% ens_keep)                %>% 
                rename(agb = fates_vegc_aboveground) 
 #amean_now = seablm_fates
+site       = sierra_amean  %>% mutate(case = "Seabloom-SierraFoothill")
 amean_now  = keep_fates
 amean_now$case = factor(amean_now$case,levels=unique(amean_now$case))
    
 gg_now = ggplot(data=amean_now)
-gg_now = gg_now + geom_line(aes(x=year,y=agb,group=ens_label,color="Model")
+gg_now = gg_now + geom_line(aes(x=year,y=agb,group=case_ens,color=case)
                               ,lwd=1,alpha=0.8,show.legend=TRUE)
-gg_now = gg_now + geom_line(data = sierra_amean,aes(x=year,y=agb,color="Seabloom-SierraFoothill"))
-gg_now = gg_now + scale_colour_manual(name="",values=c("Model"=ens_colour[1]
-                                                ,"Seabloom-SierraFoothill"=site_colour))
+gg_now = gg_now + geom_line(data = site,aes(x=year,y=agb,color=case))
+gg_now = gg_now + scale_colour_manual(name="",values=c(ens_colour[1:3],site_colour),
+                                      labels = c(case_desc, "Seabloom-SierraFoothill"))
 gg_now = gg_now + geom_ribbon( data = sierra_amean
                                 , aes(x = year,ymin=agb_qlwr,ymax=agb_qupr)
                                 , alpha       = alpha_ribbon
@@ -3152,7 +4115,7 @@ gg_now = gg_now + geom_ribbon( data = sierra_amean
                                 , show.legend = h_legend
                                 , colour      = "transparent"
                                 )
-gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))    
+#gg_now = gg_now + facet_wrap(.~case,labeller=labeller(case=case_desc))    
 
 gg_now = gg_now + xlab("Year")
 gg_now = gg_now + ylab(expression(Aboveground~biomass~"("~kgC~m^{-2}~")"))
@@ -3166,14 +4129,15 @@ gg_now = gg_now + theme(axis.text.x        = element_text( size   = gg_ptsz
                          , axis.title.y = element_text(size = gg_ptsz*0.9)
                          , legend.text=element_text(size=gg_ptsz*0.7)
                          , plot.title = element_text(size = gg_ptsz*0.95)
+                         , legend.position = "right"
                          ) #end theme
 p_output = paste0("seablm-keep-agb.",gg_device)
 dummy    = ggsave( filename = p_output
                  , plot     = gg_now
                  , device   = gg_device[d]
                  , path     = plot_main
-                 , width    = gg_width
-                 , height   = gg_height*0.7
+                 , width    = gg_width*0.5
+                 , height   = gg_height*0.5
                  , units    = gg_units
                  , dpi      = gg_depth
                     )
@@ -3276,7 +4240,7 @@ if (gg_screen) gg_delta
 
 
 
-```{r,"agb-range-model-ob-compare",results='hide'}
+```{r,label="agb-range-model-ob-compare",results='hide'}
 
 one_ens = "5_node_008-task_012"
 one_emean = emean_com                                      %>% 
@@ -3388,4 +4352,8 @@ if (gg_screen) gg_patch
             
 
 ```
+
+
+
+
 
