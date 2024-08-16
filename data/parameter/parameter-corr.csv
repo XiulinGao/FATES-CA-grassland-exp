@@ -1,0 +1,4 @@
+parameter_a,parameter_b,pft,organ,corr
+fates_leaf_slamax,fates_leaf_slatop,0,,1
+fates_leaf_slamax,fates_stoich_nitr,0,1,0.31
+fates_leaf_slatop,fates_stoich_nitr,0,1,0.31
