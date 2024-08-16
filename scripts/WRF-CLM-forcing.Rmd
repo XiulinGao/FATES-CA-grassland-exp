@@ -102,10 +102,12 @@ XLAT <- as.vector(y_sub)
 
 ##### set dir to read
 # currently, this is done by manually looping through each folder to avoid kernel crash due to memory issue
-dir_now <- dirs[41]
-files_now <- list.files(dir_now, pattern="auxhist_")
-XLONG_co <- rep(XLONG,times=length(files_now))
-XLAT_co <- rep(XLAT,times=length(files_now))
+#dir_now <- dirs[41]
+#files_now <- list.files(dir_now, pattern="auxhist_")
+#XLONG_co <- rep(XLONG,times=length(files_now))
+#XLAT_co <- rep(XLAT,times=length(files_now))
+
+
 ```
 
 
@@ -149,6 +151,13 @@ read_met <-function(filename) {
 cores = detectCores()
 cl <- makeCluster(50)
 registerDoParallel(cl)
+
+##### set dir to read
+# currently, this is done by manually looping through each folder to avoid kernel crash due to memory issue
+dir_now <- dirs[41]
+files_now <- list.files(dir_now, pattern="auxhist_")
+XLONG_co <- rep(XLONG,times=length(files_now))
+XLAT_co <- rep(XLAT,times=length(files_now))
 
 ## concatenate files 
 final_met <- foreach(i=seq(length(files_now)),.combine=rbind,
@@ -348,8 +357,8 @@ for(i in sequence(n_path)){
                            FSDS=SWDNB,
                            FLDS=LWDNB)
 
-    dt <- mean(diff(unique(met_all$time))) 
-    dt.utc <- make_difftime(hour=0) - 0.5*dt
+    dt <- round(mean(diff(unique(met_all$time))),2) #diff will automatically add leap day to make time interval > 1, we round to be 1 and check to stop if it is not 1
+    if(dt!=1){stop("time interval is not equal!!!")}
     met_all <- met_all %>% mutate(time = time + dt.utc) 
     met_all <- met_all %>% filter(!is.na(PRECTmms))
 
