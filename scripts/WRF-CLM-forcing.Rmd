@@ -357,10 +357,14 @@ for(i in sequence(n_path)){
                            FSDS=SWDNB,
                            FLDS=LWDNB)
 
-    dt <- round(mean(diff(unique(met_all$time))),2) #diff will automatically add leap day to make time interval > 1, we round to be 1 and check to stop if it is not 1
-    if(dt!=1){stop("time interval is not equal!!!")}
+    dt <- round(mean(diff(unique(met_all$time))),1) #diff will automatically add leap day to make time interval > 1, we round to be 1 and check to stop if it is not 1
+    dt.utc <- make_difftime(hour=0) - 0.5*dt
     met_all <- met_all %>% mutate(time = time + dt.utc) 
+    day1.dff <-make_difftime(day=1)
+    day2.dff <- make_difftime(day=0)
+    met_all <- met_all %>% mutate(time = if_else((month(time)==2 & day(time)==29), time - day1.dff, time + day2.dff))
     met_all <- met_all %>% filter(!is.na(PRECTmms))
+  
 
 # split data by year and month
     met_out <- met_all %>% 
